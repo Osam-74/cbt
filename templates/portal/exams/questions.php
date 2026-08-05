@@ -484,14 +484,18 @@ window.EduCBTQS = {
 
     function renderInput() {
         const container = el('qs-input');
-        if (!currentSet || !isEditable()) {
-            container.style.display = 'none';
-            return;
-        }
+        // Need a subject and class selected.
         if (!subjectSel.value || !classSel.value) {
             container.style.display = 'none';
             return;
         }
+        // If a set exists but is locked (submitted/approved/published), hide input.
+        if (currentSet && !isEditable()) {
+            container.style.display = 'none';
+            return;
+        }
+        // No set yet (currentSet === null) is fine — ensureSet() will create
+        // one lazily when the first question is saved.
         container.style.display = 'block';
 
         if (currentMethod === 'manual') {
@@ -1065,6 +1069,10 @@ window.EduCBTQS = {
         if (!currentSet || currentQuestions.length === 0) {
             emptyState.style.display = 'block';
             list.style.display = 'none';
+            // Update the empty-state message to be context-aware.
+            if (subjectSel.value && classSel.value) {
+                emptyState.querySelector('p').innerHTML = 'No questions yet. Start writing above — your questions will appear here as you add them.';
+            }
             return;
         }
 
