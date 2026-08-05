@@ -100,7 +100,7 @@ class Plugin {
     }
 
     /** Phases 0-4 applied. */
-    public const PHASE_VERSION = '12.0.5';
+    public const PHASE_VERSION = '12.0.6';
 
     /**
      * Portal styling, loaded only on portal pages so a school's public site is not

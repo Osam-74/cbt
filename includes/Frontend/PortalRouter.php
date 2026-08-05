@@ -83,7 +83,7 @@ class PortalRouter {
                 'approvals'   => [ 'capability' => Capabilities::APPROVE_QUESTIONS, 'label' => 'Approve Questions' ],
                 'invigilation' => [ 'capability' => Capabilities::ASSIGN_INVIGILATORS, 'label' => 'Invigilation Schedule' ],
                 'invigilate'  => [ 'capability' => Capabilities::INVIGILATE, 'label' => 'Live Exam Sessions' ],
-                'marking'     => [ 'capability' => Capabilities::VIEW_EXAMS, 'label' => 'Marking Status' ],
+                'marking'     => [ 'capability' => Capabilities::VIEW_EXAMS, 'label' => 'Marking' ],
                 'broadsheet'  => [ 'capability' => Capabilities::VIEW_BROADSHEET, 'label' => 'Broadsheet' ],
             ],
             'teacher' => [

@@ -1,6 +1,6 @@
 <?php
 /**
- * Marking status overview — shows all completed exams and their marking progress.
+ * Marking — teachers mark written answers here; school-wide roles see marking progress across all exams.
  *
  * For the principal/exam officer, this is a dashboard, not a marking interface.
  * Teachers who need to mark written answers still access it per-paper, but the
@@ -61,7 +61,7 @@ $completed_exams = (array) $wpdb->get_results(
 $queue    = ( $paper_id > 0 && ! $is_wide ) ? $theory->marking_queue( $school_id, $paper_id ) : [];
 $progress = $paper_id > 0 ? $theory->marking_progress( $school_id, $paper_id ) : null;
 
-$educbt_title = 'Marking Status';
+$educbt_title = 'Marking';
 
 $educbt_body = static function () use ( $flash, $pending, $completed_exams, $queue, $progress, $paper_id, $is_wide ): void {
     require EDUCBT_PRO_PATH . 'templates/portal/partials/flash.php';
@@ -93,7 +93,7 @@ $educbt_body = static function () use ( $flash, $pending, $completed_exams, $que
     <?php endif; ?>
 
     <section class="educbt-card">
-        <h2>Completed exams — marking status</h2>
+        <h2><?php echo $is_wide ? 'Completed exams — marking status' : 'Mark written answers'; ?></h2>
         <?php if ( empty( $completed_exams ) ) : ?>
             <p class="educbt-muted">No exams have been sat yet.</p>
         <?php else : ?>

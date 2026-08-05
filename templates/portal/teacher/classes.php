@@ -63,7 +63,7 @@ $educbt_body = static function () use ( $held, $duties, $session, $term ): void 
     </p>
 
     <section class="educbt-card">
-        <h2>What I hold</h2>
+        <h2>My Teaching Assignments</h2>
         <?php if ( empty( $held ) ) : ?>
             <p class="educbt-muted">You have not been assigned a class or subject yet. The school office does this under Staff.</p>
         <?php else : ?>

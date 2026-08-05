@@ -22,7 +22,7 @@ $classes     = \EduCBTPro\Core\Schema::table( 'classes' );
 $subjects    = \EduCBTPro\Core\Schema::table( 'subjects_v2' );
 $enrolments  = \EduCBTPro\Core\Schema::table( 'enrollments' );
 
-// What the teacher holds — class teacher and subject teacher assignments.
+// Teaching assignments for the current session — class teacher and subject teacher assignments.
 $held = (array) $wpdb->get_results(
     $wpdb->prepare(
         "SELECT a.assignment_type, a.class_id, a.subject_id, c.display_name AS class_name, s.name AS subject_name,
@@ -196,7 +196,7 @@ $educbt_body = static function () use ( $held, $class_teacher_of, $subject_teach
     <?php endif; ?>
 
     <section class="educbt-card">
-        <h2>What I hold</h2>
+        <h2>My Teaching Assignments</h2>
         <?php if ( empty( $held ) ) : ?>
             <p class="educbt-muted">You have not been assigned a class or subject yet. The school office does this under Staff.</p>
         <?php else : ?>

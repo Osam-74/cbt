@@ -51,8 +51,8 @@ if ( $is_reviewer ) {
 // Build subject → classes mapping for the cascading dropdown.
 $subject_classes = [];
 if ( ! empty( $subjects ) ) {
-    $subject_ids = array_map( static fn( $s ) => (int) $s['id'], $subjects );
-    $holder = implode( ',', array_fill( 0, count( $subject_ids ), '%d' );
+    $subject_ids = array_map( static function( $s ) { return (int) $s['id']; }, $subjects );
+    $holder = implode( ',', array_fill( 0, count( $subject_ids ), '%d' ) );
 
     $rows = (array) $wpdb->get_results(
         $wpdb->prepare(
@@ -83,7 +83,7 @@ if ( ! empty( $subjects ) ) {
         );
         foreach ( $subjects as $s ) {
             $sid = (int) $s['id'];
-            $subject_classes[ $sid ] = array_map( static fn( $c ) => [ 'id' => (int) $c['id'], 'name' => $c['display_name'] ], $all_classes );
+            $subject_classes[ $sid ] = array_map( static function( $c ) { return [ 'id' => (int) $c['id'], 'name' => $c['display_name'] ]; }, $all_classes );
         }
     }
 }
