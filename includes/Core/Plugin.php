@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class Plugin {
-    private const SCHEMA_VERSION = '3.0.0';
+    private const SCHEMA_VERSION = '3.0.1';
     private const VERSION        = '2.1.2';
 
     private static ?Plugin $instance = null;

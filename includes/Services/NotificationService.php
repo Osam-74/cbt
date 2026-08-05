@@ -40,6 +40,10 @@ class NotificationService {
     public const PASSWORD_RESET     = 'password_reset';
     public const ANNOUNCEMENT       = 'announcement';
     public const MESSAGE_RECEIVED   = 'message_received';
+    public const EXAM_PREP_OPENED    = 'exam_prep_opened';
+    public const QUESTION_SUBMITTED  = 'question_submitted';
+    public const QUESTION_WITHDRAWN = 'question_withdrawn';
+    public const QUESTION_DELETED    = 'question_set_deleted';
 
     /**
      * @return array<string,string>
@@ -55,6 +59,10 @@ class NotificationService {
             self::PASSWORD_RESET     => 'Password reset',
             self::ANNOUNCEMENT       => 'Announcement',
             self::MESSAGE_RECEIVED   => 'New message',
+            self::EXAM_PREP_OPENED    => 'Exam prep opened',
+            self::QUESTION_SUBMITTED  => 'Questions submitted',
+            self::QUESTION_WITHDRAWN => 'Submission withdrawn',
+            self::QUESTION_DELETED    => 'Draft set deleted',
         ];
     }
 
@@ -79,6 +87,10 @@ class NotificationService {
             self::PROMOTION_APPROVED => '/portal/student/',
             self::MESSAGE_RECEIVED   => '/portal/account/notifications/',
             self::ANNOUNCEMENT       => '/portal/account/notifications/',
+            self::EXAM_PREP_OPENED    => '/portal/exams/questions/',
+            self::QUESTION_SUBMITTED  => '/portal/exams/questions/',
+            self::QUESTION_WITHDRAWN => '/portal/exams/questions/',
+            self::QUESTION_DELETED    => '/portal/exams/questions/',
         ];
 
         return home_url( $map[ $type ] ?? '/portal/account/notifications/' );

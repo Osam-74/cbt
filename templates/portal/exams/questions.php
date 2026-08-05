@@ -412,13 +412,72 @@ window.EduCBTQS = {
             published: { text: 'Published — attached to a live exam paper.', bg: '#e0e7ff', color: '#3730a3' },
         };
         const m = messages[status] || messages.submitted;
-        banner.style.display = 'block';
+        banner.style.display = 'flex';
         banner.style.background = m.bg;
         banner.style.color = m.color;
         banner.style.padding = '10px 14px';
         banner.style.borderRadius = '8px';
         banner.style.fontWeight = '600';
-        banner.innerHTML = esc(m.text);
+        banner.style.alignItems = 'center';
+        banner.style.justifyContent = 'space-between';
+        banner.style.gap = '12px';
+
+        let html = '<span>' + esc(m.text) + '</span>';
+
+        // Withdraw button: visible when submitted or under_review
+        if (status === 'submitted' || status === 'under_review') {
+            html += '<button type="button" id="qs-withdraw-btn" class="educbt-btn" style="background:rgba(255,255,255,.7);color:inherit;border:1px solid currentColor;font-size:.85rem;padding:6px 14px;border-radius:6px;cursor:pointer;white-space:nowrap">Withdraw</button>';
+        }
+        // Delete button: visible when returned (draft-like, can be deleted entirely)
+        if (status === 'returned') {
+            html += '<button type="button" id="qs-delete-set-btn" class="educbt-btn" style="background:rgba(255,255,255,.7);color:#991b1b;border:1px solid #991b1b;font-size:.85rem;padding:6px 14px;border-radius:6px;cursor:pointer;white-space:nowrap">Delete Set</button>';
+        }
+
+        banner.innerHTML = html;
+
+        // Wire up withdraw button
+        const withdrawBtn = el('qs-withdraw-btn');
+        if (withdrawBtn) {
+            withdrawBtn.addEventListener('click', function() {
+                if (!currentSet) return;
+                if (!confirm('Withdraw this submission? The set will return to draft so you can edit your questions.')) return;
+                apiCall('POST', 'question-sets/' + currentSet.id + '/withdraw')
+                    .then(function(r) {
+                        if (r.success) {
+                            alert('Submission withdrawn. You can now edit your questions.');
+                            loadSet();
+                        } else {
+                            alert('Could not withdraw: ' + (r.message || r.error || 'unknown error'));
+                        }
+                    })
+                    .catch(function() { alert('Network error — could not withdraw.'); });
+            });
+        }
+
+        // Wire up delete button
+        const deleteBtn = el('qs-delete-set-btn');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', function() {
+                if (!currentSet) return;
+                if (!confirm('Delete this entire set? All questions in this draft will be permanently removed. This cannot be undone.')) return;
+                apiCall('DELETE', 'question-sets/' + currentSet.id)
+                    .then(function(r) {
+                        if (r.success) {
+                            alert('Draft set deleted.');
+                            currentSet = null;
+                            currentQuestions = [];
+                            renderPreview();
+                            renderProgress();
+                            renderStatusBanner();
+                            renderInput();
+                            el('qs-submit-btn').style.display = 'none';
+                        } else {
+                            alert('Could not delete: ' + (r.message || r.error || 'unknown error'));
+                        }
+                    })
+                    .catch(function() { alert('Network error — could not delete.'); });
+            });
+        }
     }
 
     // ---- Region B: Input surface ----

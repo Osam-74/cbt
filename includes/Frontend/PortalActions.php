@@ -86,6 +86,7 @@ class PortalActions {
         add_action( 'admin_post_educbt_save_promotion_rules', [ $this, 'save_promotion_rules' ] );
         add_action( 'admin_post_educbt_toggle_exam_prep', [ $this, 'toggle_exam_prep' ] );
         add_action( 'admin_post_educbt_update_student_profile', [ $this, 'update_student_profile' ] );
+        add_action( 'admin_post_educbt_teacher_add_student', [ $this, 'teacher_add_student' ] );
     }
 
     /**
@@ -2817,10 +2818,13 @@ class PortalActions {
         $body  = $enabled
             ? 'You can now submit questions for the upcoming exams. Visit the Question Bank to get started.'
             : 'Question submission is now closed. Contact the exam officer if you need changes.';
+        $notif_type = $enabled
+            ? \EduCBTPro\Services\NotificationService::EXAM_PREP_OPENED
+            : \EduCBTPro\Services\NotificationService::ANNOUNCEMENT;
         foreach ( $teachers as $teacher ) {
             $uid = absint( $teacher['wp_user_id'] ?? 0 );
             if ( $uid > 0 ) {
-                $notif_svc->notify( $school_id, $uid, 'exam_prep', $title, $body, '' );
+                $notif_svc->notify( $school_id, $uid, $notif_type, $title, $body, '' );
             }
         }
 
@@ -2875,14 +2879,13 @@ class PortalActions {
                     sanitize_text_field( (string) wp_unslash( $_POST['first_name'] ?? '' ) ) . ' ' .
                     sanitize_text_field( (string) wp_unslash( $_POST['last_name'] ?? '' ) )
                 ),
-                'parent_name'    => sanitize_text_field( (string) wp_unslash( $_POST['parent_name'] ?? '' ) ),
+                'parent_information' => sanitize_text_field( (string) wp_unslash( $_POST['parent_information'] ?? '' ) ),
                 'parent_phone'   => sanitize_text_field( (string) wp_unslash( $_POST['parent_phone'] ?? '' ) ),
                 'parent_email'   => sanitize_email( (string) wp_unslash( $_POST['parent_email'] ?? '' ) ),
-                'home_address'   => sanitize_textarea_field( (string) wp_unslash( $_POST['home_address'] ?? '' ) ),
-                'medical_notes'  => sanitize_textarea_field( (string) wp_unslash( $_POST['medical_notes'] ?? '' ) ),
+                'address'        => sanitize_textarea_field( (string) wp_unslash( $_POST['address'] ?? '' ) ),
             ],
             [ 'id' => $student_id, 'school_id' => $school_id ],
-            [ '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ],
+            [ '%s', '%s', '%s', '%s', '%s', '%s', '%s' ],
             [ '%d', '%d' ]
         );
 
@@ -2896,6 +2899,111 @@ class PortalActions {
         }
 
         $this->succeed( [ 'type' => 'student_update' ], $redirect );
+    }
+
+    /**
+     * A class teacher adds a student to their own class from the My Students page.
+     * The student is created with a 'pending_approval' enrolment status so the
+     * school office / principal must approve before the student is official.
+     */
+    public function teacher_add_student(): void {
+        [ $school_id, $scope ] = $this->context( 'educbt_teacher_add_student' );
+
+        $class_id = absint( $_POST['class_id'] ?? 0 );
+
+        // Verify this teacher is the class teacher of this class.
+        if ( ! $scope->is_school_wide() ) {
+            $actor    = $scope->actor();
+            $staff_id = (int) $actor['id'];
+
+            global $wpdb;
+            $assign_table = \EduCBTPro\Core\Schema::table( 'staff_assignments' );
+
+            $holds = (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$assign_table}
+                     WHERE school_id = %d AND staff_id = %d AND class_id = %d
+                       AND assignment_type = 'class_teacher' AND status = 'active'",
+                    $school_id, $staff_id, $class_id
+                )
+            );
+
+            if ( $holds === 0 ) {
+                $this->fail( 'You can only add students to a class you are the class teacher of.' );
+            }
+        }
+
+        $first_name = sanitize_text_field( (string) wp_unslash( $_POST['first_name'] ?? '' ) );
+        $last_name  = sanitize_text_field( (string) wp_unslash( $_POST['last_name'] ?? '' ) );
+
+        if ( $first_name === '' || $last_name === '' ) {
+            $this->fail( 'First name and last name are required.' );
+        }
+
+        $full_name = trim( $first_name . ' ' . $last_name );
+
+        // Generate an admission number.
+        $stu_table = $wpdb->prefix . 'educbt_students';
+        $existing_count = (int) $wpdb->get_var(
+            $wpdb->prepare( "SELECT COUNT(*) FROM {$stu_table} WHERE school_id = %d", $school_id )
+        );
+        $admission_number = 'EDU' . str_pad( (string) ( $existing_count + 1 ), 5, '0', STR_PAD_LEFT );
+        $registration_number = $admission_number . '-' . $school_id;
+
+        // Insert the student record.
+        $wpdb->insert(
+            $stu_table,
+            [
+                'school_id'            => $school_id,
+                'admission_number'     => $admission_number,
+                'registration_number'  => $registration_number,
+                'student_id'           => $admission_number,
+                'first_name'           => $first_name,
+                'last_name'            => $last_name,
+                'full_name'            => $full_name,
+                'gender'               => sanitize_text_field( (string) wp_unslash( $_POST['gender'] ?? '' ) ),
+                'date_of_birth'        => sanitize_text_field( (string) wp_unslash( $_POST['date_of_birth'] ?? '' ) ) ?: null,
+                'parent_phone'         => sanitize_text_field( (string) wp_unslash( $_POST['parent_phone'] ?? '' ) ),
+                'parent_email'         => sanitize_email( (string) wp_unslash( $_POST['parent_email'] ?? '' ) ),
+                'status'               => 'pending_approval',
+            ],
+            [ '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ]
+        );
+
+        $student_id = (int) $wpdb->insert_id;
+
+        if ( $student_id === 0 ) {
+            $this->fail( 'Could not create the student record.' );
+        }
+
+        // Create a pending enrolment — not active, so it won't appear in exams etc.
+        $enrollments = \EduCBTPro\Core\Schema::table( 'enrollments' );
+        $year        = new \EduCBTPro\Services\AcademicYearService();
+        $session     = $year->current_session( $school_id );
+        $session_id  = (int) ( $session['id'] ?? 0 );
+
+        $wpdb->insert(
+            $enrollments,
+            [
+                'school_id'  => $school_id,
+                'student_id' => $student_id,
+                'class_id'   => $class_id,
+                'session_id' => $session_id,
+                'status'     => 'pending_approval',
+                'enrolled_at'=> current_time( 'mysql' ),
+            ],
+            [ '%d', '%d', '%d', '%d', '%s', '%s' ]
+        );
+
+        $redirect = esc_url_raw( (string) wp_unslash( $_POST['redirect_to'] ?? '' ) );
+        if ( empty( $redirect ) ) {
+            $redirect = home_url( '/portal/teacher/students/' );
+        }
+
+        $this->succeed(
+            [ 'type' => 'student_added_pending', 'message' => 'Student added as pending approval. The school office must approve the enrolment.' ],
+            $redirect
+        );
     }
 
     /**

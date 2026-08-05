@@ -51,8 +51,8 @@ if ( $view_class > 0 && $session_id > 0 ) {
         $wpdb->prepare(
             "SELECT st.id, st.admission_number, st.first_name, st.last_name, st.full_name,
                     st.gender, st.date_of_birth, st.class, st.status,
-                    st.parent_name, st.parent_phone, st.parent_email,
-                    st.home_address, st.medical_notes
+                    st.parent_information, st.parent_phone, st.parent_email,
+                    st.address
              FROM {$enrollments} e
              INNER JOIN {$stu_table} st ON st.id = e.student_id
              WHERE e.school_id = %d AND e.class_id = %d AND e.session_id = %d AND e.status = 'active'
@@ -150,7 +150,7 @@ $educbt_body = static function () use ( $flash, $my_classes, $view_class, $stude
             <div class="educbt-grid">
                 <div>
                     <label>Name</label>
-                    <p class="educbt-muted"><?php echo esc_html( (string) ( $s['parent_name'] ?? '—' ) ); ?></p>
+                    <p class="educbt-muted"><?php echo esc_html( (string) ( $s['parent_information'] ?? '—' ) ); ?></p>
                 </div>
                 <div>
                     <label>Phone</label>
@@ -165,13 +165,10 @@ $educbt_body = static function () use ( $flash, $my_classes, $view_class, $stude
             <h3 style="margin-top:20px;font-size:15px">Other</h3>
             <div class="educbt-grid">
                 <div>
-                    <label>Home address</label>
-                    <p class="educbt-muted"><?php echo esc_html( (string) ( $s['home_address'] ?? '—' ) ); ?></p>
+                    <label>Address</label>
+                    <p class="educbt-muted"><?php echo esc_html( (string) ( $s['address'] ?? '—' ) ); ?></p>
                 </div>
-                <div>
-                    <label>Medical notes</label>
-                    <p class="educbt-muted"><?php echo esc_html( (string) ( $s['medical_notes'] ?? '—' ) ); ?></p>
-                </div>
+                
             </div>
 
             <details style="margin-top:16px">
@@ -192,8 +189,8 @@ $educbt_body = static function () use ( $flash, $my_classes, $view_class, $stude
                             <input id="upd_last_name" name="last_name" type="text" value="<?php echo esc_attr( (string) ( $s['last_name'] ?? '' ) ); ?>">
                         </div>
                         <div>
-                            <label for="upd_parent_name">Parent / Guardian name</label>
-                            <input id="upd_parent_name" name="parent_name" type="text" value="<?php echo esc_attr( (string) ( $s['parent_name'] ?? '' ) ); ?>">
+                            <label for="upd_parent_information">Parent / Guardian name</label>
+                            <input id="upd_parent_information" name="parent_information" type="text" value="<?php echo esc_attr( (string) ( $s['parent_information'] ?? '' ) ); ?>">
                         </div>
                         <div>
                             <label for="upd_parent_phone">Parent phone</label>
@@ -205,11 +202,10 @@ $educbt_body = static function () use ( $flash, $my_classes, $view_class, $stude
                         </div>
                     </div>
 
-                    <label for="upd_home_address" style="margin-top:8px">Home address</label>
-                    <textarea id="upd_home_address" name="home_address" rows="2"><?php echo esc_textarea( (string) ( $s['home_address'] ?? '' ) ); ?></textarea>
+                    <label for="upd_address" style="margin-top:8px">Address</label>
+                    <textarea id="upd_address" name="address" rows="2"><?php echo esc_textarea( (string) ( $s['address'] ?? '' ) ); ?></textarea>
 
-                    <label for="upd_medical_notes" style="margin-top:8px">Medical notes</label>
-                    <textarea id="upd_medical_notes" name="medical_notes" rows="2"><?php echo esc_textarea( (string) ( $s['medical_notes'] ?? '' ) ); ?></textarea>
+                    
 
                     <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:12px">Save changes</button>
                 </form>
@@ -237,6 +233,59 @@ $educbt_body = static function () use ( $flash, $my_classes, $view_class, $stude
             <span class="educbt-muted"><?php echo esc_html( (string) ( $session['title'] ?? '' ) ); ?></span>
         </form>
     </section>
+
+
+    <?php if ( ! empty( $my_classes ) ) : ?>
+    <section class="educbt-card no-print">
+        <details>
+            <summary style="cursor:pointer;font-weight:600;font-size:14px">+ Add a student to this class</summary>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="educbt-form" style="margin-top:12px">
+                <input type="hidden" name="action" value="educbt_teacher_add_student">
+                <input type="hidden" name="class_id" value="<?php echo esc_attr( (string) $view_class ); ?>">
+                <input type="hidden" name="redirect_to" value="<?php echo esc_attr( add_query_arg( [ 'class' => $view_class ], home_url( '/portal/teacher/students/' ) ) ); ?>">
+                <?php wp_nonce_field( 'educbt_teacher_add_student' ); ?>
+
+                <div class="educbt-grid">
+                    <div>
+                        <label for="add_first_name">First name</label>
+                        <input id="add_first_name" name="first_name" type="text" required>
+                    </div>
+                    <div>
+                        <label for="add_last_name">Last name</label>
+                        <input id="add_last_name" name="last_name" type="text" required>
+                    </div>
+                    <div>
+                        <label for="add_gender">Gender</label>
+                        <select id="add_gender" name="gender">
+                            <option value="">—</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="add_dob">Date of birth</label>
+                        <input id="add_dob" name="date_of_birth" type="date">
+                    </div>
+                </div>
+                <div class="educbt-grid">
+                    <div>
+                        <label for="add_parent_phone">Parent phone</label>
+                        <input id="add_parent_phone" name="parent_phone" type="text">
+                    </div>
+                    <div>
+                        <label for="add_parent_email">Parent email</label>
+                        <input id="add_parent_email" name="parent_email" type="email">
+                    </div>
+                </div>
+
+                <p class="educbt-muted" style="font-size:.82rem;margin-top:6px">
+                    The student will be added as <strong>pending approval</strong>. The school office or principal must approve the enrolment before the student appears in the official register.
+                </p>
+                <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:8px">Add student</button>
+            </form>
+        </details>
+    </section>
+    <?php endif; ?>
 
     <?php if ( empty( $students ) ) : ?>
         <div class="educbt-card">
@@ -267,7 +316,7 @@ $educbt_body = static function () use ( $flash, $my_classes, $view_class, $stude
                                     </a>
                                 </td>
                                 <td><?php echo esc_html( (string) ( $st['admission_number'] ?: '—' ) ); ?></td>
-                                <td><?php echo esc_html( (string) ( $st['parent_name'] ?? '—' ) ); ?></td>
+                                <td><?php echo esc_html( (string) ( $st['parent_information'] ?? '—' ) ); ?></td>
                                 <td><?php echo esc_html( (string) ( $st['parent_phone'] ?? '—' ) ); ?></td>
                                 <td>
                                     <a class="educbt-btn" href="<?php echo esc_url( add_query_arg( [ 'class' => $view_class, 'student' => (int) $st['id'] ] ) ); ?>">View profile</a>

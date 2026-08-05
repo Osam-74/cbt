@@ -123,6 +123,26 @@ class QuestionController {
                 'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
             ]
         );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)/withdraw',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'withdraw_set' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)',
+            [
+                'methods'             => 'DELETE',
+                'callback'            => [ $this, 'delete_set' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
     }
 
     public function create( $request ) {
@@ -288,5 +308,43 @@ class QuestionController {
         }
 
         return implode( ' ', array_unique( $out ) ) ?: 'That question could not be saved.';
+    }
+
+    public function withdraw_set( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope     = new Scope();
+        $actor     = $scope->actor();
+        $set_id    = absint( $request['set_id'] ?? 0 );
+
+        $service = new QuestionSetService();
+        $result = $service->withdraw_set( $school_id, (int) $actor['id'], $set_id );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = $result['error'] === 'cannot_withdraw' ? 'This set cannot be withdrawn in its current status.'
+                : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
+                : 'Set not found.' );
+            return new \WP_Error( 'educbt_withdraw_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true, 'message' => 'Submission withdrawn. The set is back to draft.' ];
+    }
+
+    public function delete_set( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope     = new Scope();
+        $actor     = $scope->actor();
+        $set_id    = absint( $request['set_id'] ?? 0 );
+
+        $service = new QuestionSetService();
+        $result = $service->delete_set( $school_id, (int) $actor['id'], $set_id );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = $result['error'] === 'cannot_delete' ? 'Only draft or returned sets can be deleted.'
+                : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
+                : 'Set not found.' );
+            return new \WP_Error( 'educbt_delete_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true, 'message' => 'Draft set deleted.' ];
     }
 }

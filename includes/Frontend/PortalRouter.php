@@ -100,7 +100,8 @@ class PortalRouter {
                 // Only a class teacher enrols students, and only into their own class.
                 // Offering it to every teacher produced a menu item that always
                 // refused — "you can only register students to a class you hold".
-                'register'     => [ 'capability' => Capabilities::REGISTER_STUDENTS, 'label' => 'Class Register', 'requires_class_teacher' => true ],
+                // Class Register removed from teacher nav — only school management registers students.
+                // Class teachers add students from 'My Students' page instead (pending approval).
                 'results'      => [ 'capability' => Capabilities::ENTER_SCORES, 'label' => 'Class Results', 'requires_class_teacher' => true ],
             ],
             'student' => [

@@ -615,6 +615,163 @@ class QuestionSetService {
         // Record in revision history.
         $this->append_revision( $set_id, 'submitted', $teacher_id );
 
+        // Notify exam officers and principals that a set was submitted for review.
+        $subject_name = (string) $wpdb->get_var(
+            $wpdb->prepare( "SELECT name FROM " . Schema::table( 'subjects_v2' ) . " WHERE id = %d", $set['subject_id'] )
+        );
+        $class_name = (string) $wpdb->get_var(
+            $wpdb->prepare( "SELECT display_name FROM " . Schema::table( 'classes' ) . " WHERE id = %d", $set['class_id'] )
+        );
+        $teacher_name = (string) $wpdb->get_var(
+            $wpdb->prepare( "SELECT CONCAT(first_name, ' ', last_name) FROM " . Schema::table( 'staff' ) . " WHERE id = %d", $teacher_id )
+        );
+
+        $notif = new NotificationService();
+        $reviewer_ids = $this->get_reviewer_user_ids( $school_id );
+        $q_count = $this->question_count( $set_id );
+        $title = 'Questions submitted for review';
+        $body = $teacher_name . ' submitted ' . $q_count . ' ' . $set['exam_type'] . ' questions for ' . $subject_name . ' (' . $class_name . ').';
+        foreach ( $reviewer_ids as $rid ) {
+            $notif->notify( $school_id, $rid, NotificationService::QUESTION_SUBMITTED, $title, $body, '' );
+        }
+
+        return [ 'success' => true ];
+    }
+
+    /**
+     * Withdraw a submitted set back to draft status.
+     * Only works if the set is 'submitted' or 'under_review' (not yet approved/published).
+     */
+    public function withdraw_set( int $school_id, int $teacher_id, int $set_id ): array {
+        global $wpdb;
+
+        $set = $this->get_set( $school_id, $set_id );
+        if ( ! $set ) {
+            return [ 'success' => false, 'error' => 'set_not_found' ];
+        }
+
+        if ( ! in_array( $set['status'], [ 'submitted', 'under_review' ], true ) ) {
+            return [ 'success' => false, 'error' => 'cannot_withdraw' ];
+        }
+
+        if ( ! $this->verify_assignment( $school_id, $set['teacher_id'], $set['subject_id'], $set['class_id'] ) ) {
+            return [ 'success' => false, 'error' => 'not_assigned' ];
+        }
+
+        $table = Schema::table( 'question_sets' );
+
+        $wpdb->update(
+            $table,
+            [
+                'status'       => 'draft',
+                'submitted_at' => null,
+                'submitted_by' => null,
+            ],
+            [ 'id' => $set_id, 'school_id' => $school_id ],
+            [ '%s', '%s', '%d' ],
+            [ '%d', '%d' ]
+        );
+
+        // Also revert any questions in this set that were 'submitted' back to 'draft'.
+        $questions = $wpdb->prefix . 'educbt_questions';
+        $wpdb->update(
+            $questions,
+            [ 'approval_status' => 'draft' ],
+            [ 'question_set_id' => $set_id, 'school_id' => $school_id ],
+            [ '%s' ],
+            [ '%d', '%d' ]
+        );
+
+        $this->append_revision( $set_id, 'withdrawn', $teacher_id );
+
+        // Notify exam officers and principals.
+        $subject_name = (string) $wpdb->get_var(
+            $wpdb->prepare( "SELECT name FROM " . Schema::table( 'subjects_v2' ) . " WHERE id = %d", $set['subject_id'] )
+        );
+        $class_name = (string) $wpdb->get_var(
+            $wpdb->prepare( "SELECT display_name FROM " . Schema::table( 'classes' ) . " WHERE id = %d", $set['class_id'] )
+        );
+
+        $notif = new NotificationService();
+        $reviewer_ids = $this->get_reviewer_user_ids( $school_id );
+        $title = 'Submission withdrawn';
+        $body = 'A ' . $set['exam_type'] . ' question set for ' . $subject_name . ' (' . $class_name . ') has been withdrawn back to draft.';
+        foreach ( $reviewer_ids as $rid ) {
+            $notif->notify( $school_id, $rid, NotificationService::QUESTION_WITHDRAWN, $title, $body, '' );
+        }
+
+        return [ 'success' => true ];
+    }
+
+    /**
+     * Delete a draft set and all its questions.
+     * Only works if the set is in 'draft' or 'returned' status.
+     */
+    public function delete_set( int $school_id, int $teacher_id, int $set_id ): array {
+        global $wpdb;
+
+        $set = $this->get_set( $school_id, $set_id );
+        if ( ! $set ) {
+            return [ 'success' => false, 'error' => 'set_not_found' ];
+        }
+
+        if ( ! $this->is_editable( $set['status'] ) ) {
+            return [ 'success' => false, 'error' => 'cannot_delete' ];
+        }
+
+        if ( ! $this->verify_assignment( $school_id, $set['teacher_id'], $set['subject_id'], $set['class_id'] ) ) {
+            return [ 'success' => false, 'error' => 'not_assigned' ];
+        }
+
+        $questions = $wpdb->prefix . 'educbt_questions';
+        $options   = Schema::table( 'question_options' );
+        $table     = Schema::table( 'question_sets' );
+
+        // Delete question options for questions in this set.
+        $question_ids = (array) $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT id FROM {$questions} WHERE question_set_id = %d AND school_id = %d",
+                $set_id, $school_id
+            )
+        );
+
+        if ( ! empty( $question_ids ) ) {
+            $id_list = implode( ',', array_map( 'absint', $question_ids ) );
+            $wpdb->query( "DELETE FROM {$options} WHERE question_id IN ({$id_list})" );
+        }
+
+        // Delete the questions.
+        $wpdb->delete(
+            $questions,
+            [ 'question_set_id' => $set_id, 'school_id' => $school_id ],
+            [ '%d', '%d' ]
+        );
+
+        // Delete the set itself.
+        $wpdb->delete(
+            $table,
+            [ 'id' => $set_id, 'school_id' => $school_id ],
+            [ '%d', '%d' ]
+        );
+
+        $this->append_revision( $set_id, 'deleted', $teacher_id );
+
+        // Notify exam officers and principals.
+        $subject_name = (string) $wpdb->get_var(
+            $wpdb->prepare( "SELECT name FROM " . Schema::table( 'subjects_v2' ) . " WHERE id = %d", $set['subject_id'] )
+        );
+        $class_name = (string) $wpdb->get_var(
+            $wpdb->prepare( "SELECT display_name FROM " . Schema::table( 'classes' ) . " WHERE id = %d", $set['class_id'] )
+        );
+
+        $notif = new NotificationService();
+        $reviewer_ids = $this->get_reviewer_user_ids( $school_id );
+        $title = 'Draft set deleted';
+        $body = 'A ' . $set['exam_type'] . ' draft set for ' . $subject_name . ' (' . $class_name . ') has been deleted.';
+        foreach ( $reviewer_ids as $rid ) {
+            $notif->notify( $school_id, $rid, NotificationService::QUESTION_DELETED, $title, $body, '' );
+        }
+
         return [ 'success' => true ];
     }
 
@@ -723,12 +880,18 @@ class QuestionSetService {
             return true;
         }
 
+        // Always check the CURRENTLY LOGGED-IN actor's assignment, not whoever
+        // originally created the set. If a subject is reassigned from Teacher A
+        // to Teacher B, Teacher B must be able to pick up the existing set — the
+        // set's stored teacher_id is provenance, not an access-control field.
+        $actor_id = (int) $scope->actor()['id'];
+
         $found = $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT id FROM {$assign}
                  WHERE school_id = %d AND staff_id = %d AND subject_id = %d AND class_id = %d
                    AND status = 'active' LIMIT 1",
-                $school_id, $teacher_id, $subject_id, $class_id
+                $school_id, $actor_id, $subject_id, $class_id
             )
         );
 
@@ -770,6 +933,39 @@ class QuestionSetService {
     /**
      * Normalize a raw DB row into a typed array.
      */
+
+    /**
+     * Get wp_user_id list for all school-wide staff (exam officers, principals, VP).
+     * These are the people who need to know when a teacher submits/withdraws/deletes.
+     *
+     * @return array<int,int>
+     */
+    private function get_reviewer_user_ids( int $school_id ): array {
+        global $wpdb;
+        $staff_table = Schema::table( 'staff' );
+        $reviewer_roles = Capabilities::school_wide_roles();
+
+        $holder = implode( ',', array_fill( 0, count( $reviewer_roles ), '%s' ) );
+        $params = array_merge( [ $school_id ], $reviewer_roles );
+
+        $rows = (array) $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT wp_user_id FROM {$staff_table}
+                 WHERE school_id = %d AND wp_user_id IS NOT NULL AND status = 'active'
+                   AND role_slug IN ($holder)",
+                $params
+            ),
+            ARRAY_A
+        );
+
+        $ids = [];
+        foreach ( $rows as $r ) {
+            $uid = absint( $r['wp_user_id'] ?? 0 );
+            if ( $uid > 0 ) $ids[] = $uid;
+        }
+        return $ids;
+    }
+
     private function normalize_set( array $row ): array {
         return [
             'id'              => absint( $row['id'] ),
