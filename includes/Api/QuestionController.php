@@ -328,8 +328,9 @@ class QuestionController {
 
         $ay_service = new AcademicYearService();
         $session    = $ay_service->current_session( $school_id );
+        $term       = $ay_service->current_term( $school_id );
         $session_id = absint( $session['id'] ?? 0 );
-        $term_id    = absint( $session['current_term_id'] ?? 0 );
+        $term_id    = absint( $term['id'] ?? 0 );
 
         $service = new QuestionSetService();
         $set     = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'] );
@@ -371,8 +372,13 @@ class QuestionController {
 
         $ay_service = new AcademicYearService();
         $session    = $ay_service->current_session( $school_id );
+        $term       = $ay_service->current_term( $school_id );
         $session_id = absint( $session['id'] ?? 0 );
-        $term_id    = absint( $session['current_term_id'] ?? 0 );
+        $term_id    = absint( $term['id'] ?? 0 );
+
+        if ( ! $session_id || ! $term_id ) {
+            return new \WP_Error( 'educbt_no_active_term', 'No active academic session/term is set — ask an admin to mark one as current.', [ 'status' => 400 ] );
+        }
 
         $service = new QuestionSetService();
 
