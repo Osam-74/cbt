@@ -310,6 +310,238 @@ class QuestionController {
         return implode( ' ', array_unique( $out ) ) ?: 'That question could not be saved.';
     }
 
+    /**
+     * GET /question-sets?subject_id=&class_id=&exam_type=
+     * Load an existing set (or return null) for the given scope.
+     */
+    public function get_set( $request ) {
+        $school_id  = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope      = new Scope();
+        $actor      = $scope->actor();
+        $subject_id = absint( $request->get_param( 'subject_id' ) ?? 0 );
+        $class_id   = absint( $request->get_param( 'class_id' ) ?? 0 );
+        $exam_type  = sanitize_key( (string) ( $request->get_param( 'exam_type' ) ?? 'objective' ) );
+
+        if ( ! $subject_id || ! $class_id ) {
+            return [ 'success' => false, 'error' => 'missing_params' ];
+        }
+
+        $ay_service = new AcademicYearService();
+        $session    = $ay_service->current_session( $school_id );
+        $session_id = absint( $session['id'] ?? 0 );
+        $term_id    = absint( $session['current_term_id'] ?? 0 );
+
+        $service = new QuestionSetService();
+        $set     = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'] );
+
+        $questions = [];
+        $sibling   = null;
+
+        if ( $set ) {
+            $questions = $service->get_questions( absint( $set['id'] ) );
+            $sibling   = $service->get_sibling_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type );
+            if ( $sibling ) {
+                $set['_sibling'] = $sibling;
+            }
+        }
+
+        return [
+            'success'   => true,
+            'set'       => $set,
+            'questions' => $questions,
+        ];
+    }
+
+    /**
+     * POST /question-sets
+     * Create a new set (or load existing) for the given scope.
+     */
+    public function create_or_load_set( $request ) {
+        $school_id  = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope      = new Scope();
+        $actor      = $scope->actor();
+        $subject_id = absint( $request->get_param( 'subject_id' ) ?? 0 );
+        $class_id   = absint( $request->get_param( 'class_id' ) ?? 0 );
+        $exam_type  = sanitize_key( (string) ( $request->get_param( 'exam_type' ) ?? 'objective' ) );
+        $marks      = (float) ( $request->get_param( 'default_marks' ) ?? 1 );
+
+        if ( ! $subject_id || ! $class_id ) {
+            return new \WP_Error( 'educbt_missing_params', 'Subject and class are required.', [ 'status' => 400 ] );
+        }
+
+        $ay_service = new AcademicYearService();
+        $session    = $ay_service->current_session( $school_id );
+        $session_id = absint( $session['id'] ?? 0 );
+        $term_id    = absint( $session['current_term_id'] ?? 0 );
+
+        $service = new QuestionSetService();
+
+        // Try to find existing first.
+        $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'] );
+
+        if ( ! $set ) {
+            $result = $service->create_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'], $marks );
+            if ( empty( $result['id'] ) ) {
+                return new \WP_Error( 'educbt_create_failed', 'Could not create question set.', [ 'status' => 400 ] );
+            }
+            $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'] );
+        }
+
+        $questions = $set ? $service->get_questions( absint( $set['id'] ) ) : [];
+
+        return [
+            'success'   => true,
+            'set'       => $set,
+            'questions' => $questions,
+        ];
+    }
+
+    /**
+     * POST /question-sets/{id}/questions
+     */
+    public function add_question( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $set_id    = absint( $request['set_id'] ?? 0 );
+
+        $data = [
+            'stem'          => (string) ( $request->get_param( 'stem' ) ?? $request->get_param( 'question_text' ) ?? '' ),
+            'marks'         => (float) ( $request->get_param( 'marks' ) ?? 1 ),
+            'options'       => (array) ( $request->get_param( 'options' ) ?? [] ),
+            'sub_items'     => (array) ( $request->get_param( 'sub_items' ) ?? [] ),
+            'explanation'   => (string) ( $request->get_param( 'explanation' ) ?? '' ),
+            'marking_guide' => (string) ( $request->get_param( 'marking_guide' ) ?? '' ),
+            'source_method' => sanitize_key( (string) ( $request->get_param( 'source_method' ) ?? 'manual' ) ),
+            'difficulty'    => sanitize_key( (string) ( $request->get_param( 'difficulty' ) ?? 'medium' ) ),
+            'passage_id'    => absint( $request->get_param( 'passage_id' ) ?? 0 ),
+            'stem_image_id' => (string) ( $request->get_param( 'stem_image_id' ) ?? '' ),
+        ];
+
+        $service = new QuestionSetService();
+        $result  = $service->add_question( $school_id, $set_id, $data );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = $result['error'] === 'set_not_found' ? 'Question set not found.'
+                : ( $result['error'] === 'set_locked' ? 'This set is locked — it has been submitted or approved.'
+                : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
+                : ( $result['error'] === 'stem_required' ? 'Question text is required.'
+                : ( $result['error'] === 'no_correct_answer' ? 'Mark which option is correct.'
+                : ( $result['error'] === 'min_two_options' ? 'Give at least two options.'
+                : 'Could not save the question.' ) ) ) ) );
+            return new \WP_Error( 'educbt_add_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true, 'id' => absint( $result['id'] ) ];
+    }
+
+    /**
+     * PUT /question-sets/{id}/questions/{qid}
+     */
+    public function update_question( $request ) {
+        $school_id   = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $set_id      = absint( $request['set_id'] ?? 0 );
+        $question_id = absint( $request['question_id'] ?? 0 );
+
+        $data = [
+            'stem'          => (string) ( $request->get_param( 'stem' ) ?? $request->get_param( 'question_text' ) ?? '' ),
+            'marks'         => (float) ( $request->get_param( 'marks' ) ?? 1 ),
+            'options'       => (array) ( $request->get_param( 'options' ) ?? [] ),
+            'sub_items'     => (array) ( $request->get_param( 'sub_items' ) ?? [] ),
+            'explanation'   => (string) ( $request->get_param( 'explanation' ) ?? '' ),
+            'marking_guide' => (string) ( $request->get_param( 'marking_guide' ) ?? '' ),
+        ];
+
+        $service = new QuestionSetService();
+        $result  = $service->update_question( $school_id, $set_id, $question_id, $data );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = $result['error'] === 'set_locked' ? 'This set is locked.'
+                : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
+                : 'Could not update the question.' );
+            return new \WP_Error( 'educbt_update_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true ];
+    }
+
+    /**
+     * DELETE /question-sets/{id}/questions/{qid}
+     */
+    public function delete_question( $request ) {
+        $school_id   = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $set_id      = absint( $request['set_id'] ?? 0 );
+        $question_id = absint( $request['question_id'] ?? 0 );
+
+        $service = new QuestionSetService();
+        $result  = $service->delete_question( $school_id, $set_id, $question_id );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = $result['error'] === 'set_locked' ? 'This set is locked.'
+                : 'Could not delete the question.';
+            return new \WP_Error( 'educbt_delete_q_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true ];
+    }
+
+    /**
+     * POST /question-sets/{id}/questions/{qid}/duplicate
+     */
+    public function duplicate_question( $request ) {
+        $school_id   = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $set_id      = absint( $request['set_id'] ?? 0 );
+        $question_id = absint( $request['question_id'] ?? 0 );
+
+        $service = new QuestionSetService();
+        $result  = $service->duplicate_question( $school_id, $set_id, $question_id );
+
+        if ( empty( $result['success'] ) ) {
+            return new \WP_Error( 'educbt_duplicate_failed', 'Could not duplicate the question.', [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true, 'id' => absint( $result['id'] ) ];
+    }
+
+    /**
+     * POST /question-sets/{id}/reorder
+     */
+    public function reorder( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $set_id    = absint( $request['set_id'] ?? 0 );
+        $order     = (array) ( $request->get_json_params() ?? [] );
+
+        $service = new QuestionSetService();
+        $result  = $service->reorder( $school_id, $set_id, $order );
+
+        if ( empty( $result['success'] ) ) {
+            return new \WP_Error( 'educbt_reorder_failed', 'Could not reorder questions.', [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true ];
+    }
+
+    /**
+     * POST /question-sets/{id}/submit
+     */
+    public function submit_set( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope     = new Scope();
+        $actor     = $scope->actor();
+        $set_id    = absint( $request['set_id'] ?? 0 );
+
+        $service = new QuestionSetService();
+        $result  = $service->submit_set( $school_id, $set_id, (int) $actor['id'] );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = $result['error'] === 'below_minimum' ? 'You need at least ' . absint( $result['min'] ) . ' questions before submitting.'
+                : ( $result['error'] === 'wrong_status' ? 'This set cannot be submitted in its current status.'
+                : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
+                : 'Set not found.' ) );
+            return new \WP_Error( 'educbt_submit_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [ 'success' => true, 'message' => 'Submitted for review.' ];
+    }
+
     public function withdraw_set( $request ) {
         $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
         $scope     = new Scope();

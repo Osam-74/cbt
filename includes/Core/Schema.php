@@ -31,7 +31,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Schema {
 
     /** Bump when any statement below changes. */
-    public const VERSION = '2.0.1';
+    public const VERSION = '2.0.2';
 
     public static function table( string $name ): string {
         global $wpdb;
