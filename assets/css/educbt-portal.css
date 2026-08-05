@@ -1,0 +1,491 @@
+/* EduCBT portal — v2.1.0
+   Sidebar + content on desktop, hamburger drawer on mobile.
+   All rules are scoped under body.educbt-portal with !important so this
+   stylesheet always wins over anything a theme or caching layer injects —
+   this file has previously lost specificity fights to cached/combined CSS. */
+
+body.educbt-portal {
+    --edu-topbar-h: 64px;
+    --edu-sidebar-w: 250px;
+    margin: 0 !important;
+    background: #f5f7f6 !important;
+    color: #16211c !important;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
+    font-size: 15px !important;
+    line-height: 1.55 !important;
+}
+body.educbt-portal *,
+body.educbt-portal *::before,
+body.educbt-portal *::after { box-sizing: border-box !important; }
+
+body.educbt-portal .educbt-skip { position: absolute; left: -9999px; }
+body.educbt-portal .educbt-skip:focus { left: 8px; top: 8px; background: #fff; padding: 8px 14px; z-index: 200; }
+body.educbt-portal .educbt-nav-toggle { position: absolute; opacity: 0; pointer-events: none; }
+
+/* ---------- Topbar — same dark green as the sidebar, no seam between them ---------- */
+body.educbt-portal .educbt-topbar {
+    position: sticky !important; top: 0 !important; z-index: 80 !important;
+    height: var(--edu-topbar-h) !important; display: flex !important; align-items: center !important;
+    gap: 16px !important; padding: 0 16px !important;
+    background: #0e2a1c !important; border-bottom: 1px solid rgba(255,255,255,.08) !important;
+}
+body.educbt-portal .educbt-burger {
+    display: flex !important; flex-direction: column !important; justify-content: center !important; gap: 4px !important;
+    width: 38px !important; height: 38px !important; padding: 9px !important; border-radius: 8px !important;
+    cursor: pointer !important; flex: 0 0 auto !important;
+}
+body.educbt-portal .educbt-burger span { display: block !important; height: 2px !important; background: #d7f2a0 !important; border-radius: 2px !important; }
+body.educbt-portal .educbt-burger:hover { background: rgba(255,255,255,.1) !important; }
+
+/* Role + school name — desktop only, sits in the header, left column matching
+   the sidebar's width so it lines up with the nav below it. */
+body.educbt-portal .educbt-topbar__brand {
+    display: none !important;
+}
+body.educbt-portal .educbt-topbar__role {
+    font-weight: 700 !important; font-size: 15px !important; color: #fff !important; line-height: 1.25 !important;
+}
+body.educbt-portal .educbt-topbar__schoolname {
+    font-size: 11.5px !important; color: #7fae72 !important; line-height: 1.25 !important;
+    overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+}
+
+/* Page title — left, next to the hamburger/brand, same row as the bell */
+body.educbt-portal .educbt-topbar__title {
+    margin: 0 !important; font-size: 17px !important; font-weight: 650 !important; color: #d7f2a0 !important;
+    white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+    flex: 1 1 auto !important; min-width: 0 !important;
+}
+
+/* Right side — notification bell only */
+body.educbt-portal .educbt-topbar__right { display: flex !important; align-items: center !important; flex: 0 0 auto !important; }
+body.educbt-portal .educbt-bell {
+    position: relative !important; display: inline-flex !important; color: #d7f2a0 !important;
+    padding: 6px !important; border-radius: 8px !important; text-decoration: none !important;
+}
+body.educbt-portal .educbt-bell:hover { background: rgba(255,255,255,.1) !important; }
+body.educbt-portal .educbt-bell__count {
+    position: absolute !important; top: 0 !important; right: 0 !important; min-width: 16px !important; height: 16px !important;
+    padding: 0 4px !important; background: #b91c1c !important; color: #fff !important; border-radius: 9px !important;
+    font-size: 10.5px !important; line-height: 16px !important; text-align: center !important;
+}
+
+/* ---------- Layout ---------- */
+body.educbt-portal .educbt-layout { display: block !important; }
+
+/* ---------- Sidebar ---------- */
+body.educbt-portal .educbt-sidebar {
+    position: fixed !important; top: var(--edu-topbar-h) !important; left: 0 !important; bottom: 0 !important; z-index: 70 !important;
+    width: var(--edu-sidebar-w) !important; overflow-y: auto !important;
+    display: flex !important; flex-direction: column !important;
+    background: #0e2a1c !important; color: #d7f2a0 !important;
+    transform: translateX(-100%) !important; transition: transform .2s ease !important;
+}
+body.educbt-portal .educbt-nav-toggle:checked ~ .educbt-layout .educbt-sidebar { transform: translateX(0) !important; }
+body.educbt-portal .educbt-scrim {
+    position: fixed !important; inset: var(--edu-topbar-h) 0 0 0 !important; z-index: 40 !important;
+    background: rgba(16,28,22,.45) !important; opacity: 0 !important; pointer-events: none !important; transition: opacity .2s !important;
+}
+body.educbt-portal .educbt-nav-toggle:checked ~ .educbt-layout .educbt-scrim { opacity: 1 !important; pointer-events: auto !important; }
+
+/* Mobile-only role/school block inside the drawer — hidden on desktop, where
+   the same info lives in the header instead (see .educbt-topbar__brand). */
+body.educbt-portal .educbt-sidebar__who {
+    display: flex !important; flex-direction: column !important; gap: 3px !important; text-align: left !important;
+    padding: 20px 18px 16px !important; border-bottom: 1px solid rgba(255,255,255,.1) !important; flex: 0 0 auto !important;
+}
+body.educbt-portal .educbt-sidebar__role { font-weight: 700 !important; font-size: 15.5px !important; color: #fff !important; }
+body.educbt-portal .educbt-sidebar__schoolname {
+    font-size: 12.5px !important; color: #7fae72 !important;
+    overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+}
+
+body.educbt-portal .educbt-sidebar__scroll { flex: 1 1 auto !important; overflow-y: auto !important; padding: 14px 12px !important; }
+body.educbt-portal .educbt-sidebar__block { margin-bottom: 16px !important; }
+body.educbt-portal .educbt-sidebar__label {
+    margin: 0 0 6px !important; padding: 0 10px !important; font-size: 10.5px !important; font-weight: 700 !important;
+    letter-spacing: .1em !important; text-transform: uppercase !important; color: #7fae72 !important;
+}
+
+body.educbt-portal .educbt-sidebar__link,
+body.educbt-portal .educbt-sidebar__area {
+    position: relative !important; display: flex !important; align-items: center !important; gap: 11px !important;
+    padding: 10px 14px !important; margin-bottom: 2px !important; border-radius: 10px !important;
+    text-decoration: none !important; color: #d7f2a0 !important; font-size: 14.5px !important; font-weight: 500 !important;
+    transition: background .12s ease, color .12s ease !important;
+}
+body.educbt-portal .educbt-sidebar__icon { flex: 0 0 auto !important; opacity: .85 !important; width: 18px !important; height: 18px !important; }
+body.educbt-portal .educbt-sidebar__link:hover,
+body.educbt-portal .educbt-sidebar__area:hover { background: rgba(255,255,255,.06) !important; }
+
+body.educbt-portal .educbt-sidebar__link.is-current,
+body.educbt-portal .educbt-sidebar__area.is-current { background: rgba(74,222,128,.22) !important; color: #f4ffe0 !important; font-weight: 650 !important; }
+body.educbt-portal .educbt-sidebar__link.is-current .educbt-sidebar__icon,
+body.educbt-portal .educbt-sidebar__area.is-current .educbt-sidebar__icon { opacity: 1 !important; }
+body.educbt-portal .educbt-sidebar__link.is-current::after,
+body.educbt-portal .educbt-sidebar__area.is-current::after {
+    content: '' !important; position: absolute !important; right: 0 !important; top: 7px !important; bottom: 7px !important;
+    width: 3px !important; border-radius: 3px 0 0 3px !important; background: #34d668 !important;
+}
+body.educbt-portal .educbt-sidebar__area { font-weight: 600 !important; }
+
+body.educbt-portal .educbt-sidebar__foot { flex: 0 0 auto !important; padding: 14px 12px !important; border-top: 1px solid rgba(255,255,255,.1) !important; }
+body.educbt-portal .educbt-sidebar__account {
+    display: flex !important; align-items: center !important; gap: 10px !important; padding: 8px 10px !important;
+    border-radius: 10px !important; text-decoration: none !important; color: #d7f2a0 !important;
+}
+body.educbt-portal .educbt-sidebar__account:hover { background: rgba(255,255,255,.06) !important; }
+body.educbt-portal .educbt-sidebar__avatar {
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    width: 34px !important; height: 34px !important; border-radius: 50% !important;
+    background: rgba(74,222,128,.25) !important; color: #f4ffe0 !important; font-weight: 700 !important; font-size: 13px !important;
+    flex: 0 0 auto !important;
+}
+body.educbt-portal .educbt-sidebar__account-text { display: flex !important; flex-direction: column !important; line-height: 1.2 !important; min-width: 0 !important; }
+body.educbt-portal .educbt-sidebar__account-text strong {
+    font-size: 13.5px !important; font-weight: 600 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+}
+body.educbt-portal .educbt-sidebar__account-text small { font-size: 11px !important; color: #7fae72 !important; }
+body.educbt-portal .educbt-sidebar__signout {
+    display: block !important; padding: 8px 10px !important; margin-top: 6px !important; border-radius: 8px !important;
+    text-decoration: none !important; color: #7fae72 !important; font-size: 13px !important;
+}
+body.educbt-portal .educbt-sidebar__signout:hover { background: rgba(255,255,255,.06) !important; color: #d7f2a0 !important; }
+
+/* ---------- Content ---------- */
+body.educbt-portal .educbt-content { padding: 24px 20px 56px !important; max-width: 1140px !important; margin: 0 auto !important; box-sizing: border-box !important; }
+
+/* ---------- Cards ---------- */
+body.educbt-portal .educbt-card {
+    background: #fff !important; border: 1px solid #e2e8e4 !important; border-radius: 14px !important; padding: 20px !important;
+    margin-bottom: 16px !important; box-shadow: 0 1px 2px rgba(16,28,22,.04), 0 8px 24px -12px rgba(16,28,22,.1) !important;
+}
+body.educbt-portal .educbt-card h2 { margin: 0 0 14px !important; font-size: 15.5px !important; font-weight: 660 !important; }
+body.educbt-portal .educbt-muted { color: #64726b !important; font-size: 13.5px !important; }
+
+/* ---------- Buttons ---------- */
+body.educbt-portal .educbt-btn {
+    display: inline-block !important; padding: 9px 16px !important; border: 1px solid #e2e8e4 !important; border-radius: 9px !important;
+    background: #fff !important; color: #16211c !important; text-decoration: none !important; font: inherit !important;
+    font-size: 14px !important; font-weight: 550 !important; cursor: pointer !important;
+}
+body.educbt-portal .educbt-btn:hover { border-color: #14532d !important; color: #14532d !important; }
+body.educbt-portal .educbt-btn--primary,
+body.educbt-portal .educbt-btn--primary:hover,
+body.educbt-portal .educbt-btn--primary:focus { background: #14532d !important; border-color: #14532d !important; color: #fff !important; }
+body.educbt-portal .educbt-btn--ghost { border-color: transparent !important; color: #64726b !important; padding: 7px 10px !important; }
+
+/* ---------- Stats ---------- */
+body.educbt-portal .educbt-stats { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 12px !important; margin-bottom: 16px !important; }
+body.educbt-portal .educbt-stat {
+    background: #fff !important; border: 1px solid #e2e8e4 !important; border-radius: 14px !important; padding: 16px !important;
+    text-align: center !important; box-shadow: 0 1px 2px rgba(16,28,22,.04), 0 8px 24px -12px rgba(16,28,22,.1) !important;
+}
+body.educbt-portal .educbt-stat b { display: block !important; font-size: 25px !important; font-weight: 700 !important; }
+body.educbt-portal .educbt-stat span { font-size: 11.5px !important; text-transform: uppercase !important; letter-spacing: .06em !important; color: #64726b !important; }
+
+/* ---------- Tables ---------- */
+body.educbt-portal .educbt-table {
+    width: 100% !important; border-collapse: separate !important; border-spacing: 0 !important; font-size: 14px !important;
+    border: 1px solid #e2e8e4 !important; border-radius: 12px !important; overflow: hidden !important;
+}
+body.educbt-portal .educbt-table th,
+body.educbt-portal .educbt-table td { text-align: left !important; padding: 12px 14px !important; border-bottom: 1px solid #e2e8e4 !important; }
+body.educbt-portal .educbt-table th { font-size: 12px !important; background: #14532d !important; color: #fff !important; font-weight: 650 !important; border-bottom: 0 !important; }
+body.educbt-portal .educbt-table tbody tr:hover { background: #f5f7f6 !important; }
+body.educbt-portal .educbt-table tbody tr:last-child td { border-bottom: 0 !important; }
+
+/* ---------- Notes ---------- */
+body.educbt-portal .educbt-note { padding: 12px 16px !important; border-radius: 10px !important; margin-bottom: 16px !important; font-size: 14px !important; }
+body.educbt-portal .educbt-note--warn { background: #fef3c7 !important; color: #92400e !important; }
+
+/* ---------- Forms ---------- */
+/* Real markup: <form class="educbt-form"><div class="educbt-grid"><div><label>..
+   <input/select/textarea></div></div></form> — no wrapper class per field. */
+body.educbt-portal .educbt-grid {
+    display: grid !important; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;
+    gap: 14px 16px !important; margin-bottom: 4px !important; align-items: start !important;
+}
+body.educbt-portal .educbt-form label {
+    display: block !important; margin-bottom: 5px !important; font-weight: 550 !important; font-size: 13.5px !important; color: #16211c !important;
+}
+body.educbt-portal .educbt-form input[type="text"],
+body.educbt-portal .educbt-form input[type="email"],
+body.educbt-portal .educbt-form input[type="number"],
+body.educbt-portal .educbt-form input[type="password"],
+body.educbt-portal .educbt-form input[type="url"],
+body.educbt-portal .educbt-form input[type="tel"],
+body.educbt-portal .educbt-form input[type="search"],
+body.educbt-portal .educbt-form input[type="date"],
+body.educbt-portal .educbt-form input[type="time"],
+body.educbt-portal .educbt-form input[type="datetime-local"],
+body.educbt-portal .educbt-form select,
+body.educbt-portal .educbt-form textarea {
+    width: 100% !important; padding: 9px 12px !important; border: 1px solid #d7dedb !important; border-radius: 9px !important;
+    font: inherit !important; font-size: 14px !important; background: #fff !important; color: #16211c !important;
+    line-height: 1.4 !important; box-shadow: none !important; appearance: auto !important;
+}
+body.educbt-portal .educbt-form input:focus,
+body.educbt-portal .educbt-form select:focus,
+body.educbt-portal .educbt-form textarea:focus {
+    outline: none !important; border-color: #14532d !important; box-shadow: 0 0 0 3px rgba(20,83,45,.12) !important;
+}
+body.educbt-portal .educbt-form input::placeholder,
+body.educbt-portal .educbt-form textarea::placeholder { color: #9aa6a0 !important; }
+body.educbt-portal .educbt-form textarea { min-height: 90px !important; resize: vertical !important; }
+/* Checkbox / radio rows — label wraps the input inline, not stacked */
+body.educbt-portal .educbt-form label:has(> input[type="checkbox"]),
+body.educbt-portal .educbt-form label:has(> input[type="radio"]) {
+    display: flex !important; align-items: center !important; gap: 8px !important; font-weight: 400 !important;
+}
+body.educbt-portal .educbt-form input[type="checkbox"],
+body.educbt-portal .educbt-form input[type="radio"] {
+    width: auto !important; accent-color: #14532d !important; margin: 0 !important;
+}
+body.educbt-portal .educbt-form input:disabled,
+body.educbt-portal .educbt-form select:disabled { background: #f5f7f6 !important; color: #9aa6a0 !important; cursor: not-allowed !important; }
+
+/* ---------- Desktop ---------- */
+@media (min-width: 900px) {
+    body.educbt-portal .educbt-burger { display: none !important; }
+    /* Brand block takes over the header's left column, matching the sidebar
+       width so it sits directly above the nav — same row as the bell. */
+    body.educbt-portal .educbt-topbar__brand {
+        display: flex !important; flex-direction: column !important; justify-content: center !important;
+        width: calc(var(--edu-sidebar-w) - 32px) !important; flex: 0 0 auto !important;
+    }
+    /* The mobile-only who-block inside the drawer is redundant on desktop —
+       the same info is already in the header. */
+    body.educbt-portal .educbt-sidebar__who { display: none !important; }
+
+    body.educbt-portal .educbt-sidebar { transform: translateX(0) !important; }
+    body.educbt-portal .educbt-scrim { display: none !important; }
+    body.educbt-portal .educbt-content { margin-left: var(--edu-sidebar-w) !important; margin-right: auto !important; padding: 28px 48px 70px !important; max-width: 1200px !important; }
+    body.educbt-portal .educbt-stats { grid-template-columns: repeat(4, 1fr) !important; }
+}
+
+/* ---------- Login / Sign-in page ---------- */
+body.educbt-portal.educbt-signin { display: flex !important; align-items: center !important; justify-content: center !important; min-height: 100vh !important; background: #f0f4f1 !important; padding: 20px !important; }
+body.educbt-portal.educbt-signin .educbt-signin__wrap { width: 100% !important; max-width: 420px !important; margin: 0 auto !important; }
+body.educbt-portal.educbt-signin .educbt-signin__card { background: #fff !important; border: 1px solid #e2e8e4 !important; border-radius: 16px !important; padding: 36px 32px !important; box-shadow: 0 4px 24px rgba(16,28,22,.08) !important; }
+body.educbt-portal.educbt-signin .educbt-signin__crest { width: 56px !important; height: 56px !important; object-fit: contain !important; margin: 0 auto 16px !important; display: block !important; }
+body.educbt-portal.educbt-signin h1 { margin: 0 0 4px !important; font-size: 21px !important; font-weight: 700 !important; text-align: center !important; color: #16211c !important; }
+body.educbt-portal.educbt-signin .educbt-muted { text-align: center !important; margin-bottom: 24px !important; }
+body.educbt-portal.educbt-signin .educbt-signin__hint { margin-top: 18px !important; padding: 12px 16px !important; background: #f5f7f6 !important; border-radius: 10px !important; font-size: 13px !important; color: #64726b !important; }
+
+/* ---------- Pills / Status badges ---------- */
+body.educbt-portal .educbt-pill { display: inline-block !important; padding: 3px 10px !important; border-radius: 6px !important; font-size: 12px !important; font-weight: 600 !important; background: #f0f4f1 !important; color: #64726b !important; text-transform: capitalize !important; }
+body.educbt-portal .educbt-pill--published, body.educbt-portal .educbt-pill--active, body.educbt-portal .educbt-pill--approved, body.educbt-portal .educbt-pill--completed { background: #dcfce7 !important; color: #166534 !important; }
+body.educbt-portal .educbt-pill--draft { background: #fef9c3 !important; color: #854d0e !important; }
+body.educbt-portal .educbt-pill--pending, body.educbt-portal .educbt-pill--submitted { background: #ffedd5 !important; color: #9a3412 !important; }
+body.educbt-portal .educbt-pill--graded { background: #dbeafe !important; color: #1e40af !important; }
+body.educbt-portal .educbt-pill--rejected { background: #fee2e2 !important; color: #991b1b !important; }
+
+/* ---------- Lists (activity log) ---------- */
+body.educbt-portal .educbt-list { list-style: none !important; margin: 0 !important; padding: 0 !important; }
+body.educbt-portal .educbt-list--log li { display: flex !important; justify-content: space-between !important; padding: 10px 0 !important; border-bottom: 1px solid #e2e8e4 !important; font-size: 14px !important; }
+body.educbt-portal .educbt-list--log li:last-child { border-bottom: 0 !important; }
+
+/* ---------- Live exam card ---------- */
+body.educbt-portal .educbt-card--live { border-color: #86efac !important; }
+body.educbt-portal .educbt-live { display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 12px !important; padding: 12px 0 !important; }
+
+/* ---------- Media field (passport photo) ---------- */
+body.educbt-portal .educbt-media { display: flex !important; align-items: center !important; gap: 14px !important; flex-wrap: wrap !important; }
+body.educbt-portal .educbt-media__preview { width: 80px !important; height: 100px !important; border: 2px dashed #c8d4ce !important; border-radius: 10px !important; background: #f5f7f6 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow: hidden !important; flex: 0 0 auto !important; }
+body.educbt-portal .educbt-media__preview img { width: 100% !important; height: 100% !important; object-fit: cover !important; border-radius: 8px !important; }
+body.educbt-portal .educbt-media__preview--empty::before { content: 'Photo' !important; font-size: 12px !important; color: #9aa6a0 !important; }
+body.educbt-portal .educbt-media__btn { display: inline-block !important; padding: 7px 14px !important; border: 1px solid #d7dedb !important; border-radius: 8px !important; background: #fff !important; color: #16211c !important; font-size: 13px !important; font-weight: 550 !important; cursor: pointer !important; text-decoration: none !important; text-align: center !important; }
+body.educbt-portal .educbt-media__btn:hover { border-color: #14532d !important; color: #14532d !important; }
+
+/* ---------- File upload (CSV) ---------- */
+body.educbt-portal .educbt-form input[type="file"] { width: 100% !important; padding: 10px 12px !important; border: 1px dashed #c8d4ce !important; border-radius: 9px !important; background: #f8faf9 !important; font-size: 14px !important; cursor: pointer !important; }
+body.educbt-portal .educbt-form input[type="file"]::-webkit-file-upload-button { padding: 6px 14px !important; border: 1px solid #d7dedb !important; border-radius: 6px !important; background: #fff !important; color: #16211c !important; font-size: 13px !important; cursor: pointer !important; margin-right: 10px !important; }
+
+/* ---------- Promotion checkbox grid ---------- */
+body.educbt-portal .educbt-check-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)) !important; gap: 8px !important; }
+body.educbt-portal .educbt-check-grid label { display: flex !important; align-items: center !important; gap: 8px !important; font-weight: 400 !important; font-size: 13.5px !important; padding: 8px 10px !important; border: 1px solid #e2e8e4 !important; border-radius: 8px !important; cursor: pointer !important; }
+body.educbt-portal .educbt-check-grid label:hover { background: #f5f7f6 !important; }
+body.educbt-portal .educbt-check-grid input[type="checkbox"] { width: auto !important; accent-color: #14532d !important; }
+
+
+
+/* ---------- Question bank ---------- */
+[body.edu](https://body.edu)cbt-portal .q-item { border: 1px solid #e2e8e4 !important; border-radius: 10px !important; padding: 14px !important; margin-bottom: 12px !important; background: #fff !important; }
+[body.edu](https://body.edu)cbt-portal .q-item__head { display: flex !important; align-items: center !important; gap: 10px !important; flex-wrap: wrap !important; margin-bottom: 8px !important; }
+[body.edu](https://body.edu)cbt-portal .q-item__body { font-size: 14.5px !important; line-height: 1.6 !important; color: #16211c !important; }
+[body.edu](https://body.edu)cbt-portal .q-item__options { list-style: none !important; padding: 0 !important; margin: 8px 0 0 !important; font-size: 13.5px !important; }
+[body.edu](https://body.edu)cbt-portal .q-item__options li { padding: 5px 0 !important; color: #64726b !important; }
+[body.edu](https://body.edu)cbt-portal .q-item__options li.is-correct { color: #14532d !important; font-weight: 600 !important; }
+[body.edu](https://body.edu)cbt-portal .q-item__edit { margin-top: 12px !important; padding-top: 12px !important; border-top: 1px solid #e2e8e4 !important; }
+[body.edu](https://body.edu)cbt-portal .q-status { font-size: 13px !important; color: #14532d !important; font-weight: 500 !important; }
+[body.edu](https://body.edu)cbt-portal .q-tally { list-style: none !important; padding: 0 !important; margin: 0 !important; }
+[body.edu](https://body.edu)cbt-portal .q-tally li { padding: 6px 0 !important; border-bottom: 1px solid #e2e8e4 !important; font-size: 14px !important; }
+[body.edu](https://body.edu)cbt-portal .q-tally li:last-child { border-bottom: 0 !important; }
+
+/* ---------- Progress bar (marking status) ---------- */
+[body.edu](https://body.edu)cbt-portal .educbt-progress { background: #f0f4f1 !important; border-radius: 6px !important; height: 8px !important; overflow: hidden !important; }
+[body.edu](https://body.edu)cbt-portal .educbt-progress__bar { background: #14532d !important; height: 100% !important; transition: width .3s !important; }
+
+/* Collapsible sections. Entry forms fold away so the list beneath them — the roll,
+   which is what the page is actually for — is what you see first. */
+/* The uploaded build wraps these as plain <details><summary><h2>. Style that shape
+   directly rather than requiring a class on every one. */
+.educbt-content > details > summary,
+.educbt-collapse > summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    cursor: pointer; padding: 16px 18px; list-style: none;
+}
+.educbt-content > details > summary::-webkit-details-marker,
+.educbt-collapse > summary::-webkit-details-marker { display: none; }
+.educbt-content > details > summary h2,
+.educbt-collapse > summary h2 { margin: 0; font-size: 15.5px; }
+.educbt-content > details > summary {
+    background: #fff; border: 1px solid var(--edu-line); border-radius: 12px;
+    margin-bottom: 16px;
+}
+.educbt-content > details[open] > summary { border-radius: 12px 12px 0 0; margin-bottom: 0; border-bottom: 0; }
+.educbt-content > details[open] > .educbt-card { border-radius: 0 0 12px 12px; border-top: 0; }
+.educbt-content > details > summary::after {
+    content: '+'; color: var(--edu-muted); font-size: 18px; line-height: 1;
+}
+.educbt-content > details[open] > summary::after { content: '\2212'; }
+.educbt-collapse__hint { font-size: 12.5px; color: var(--edu-muted); }
+.educbt-collapse[open] > summary { border-bottom: 1px solid var(--edu-line); }
+.educbt-collapse[open] .educbt-collapse__hint::after { content: ' \2212'; }
+.educbt-collapse:not([open]) .educbt-collapse__hint::after { content: ' +'; }
+.educbt-collapse > *:not(summary) { padding: 0 18px 18px; }
+
+/* Passport placeholder — a visible frame before anything is chosen, so the field
+   reads as "a photo goes here" rather than as a broken image. */
+.educbt-media--passport .educbt-media__preview {
+    background: repeating-linear-gradient(45deg, #fbfcfb, #fbfcfb 6px, #f3f6f4 6px, #f3f6f4 12px);
+}
+.educbt-media__empty { display: block; line-height: 1.3; }
+
+/* ---------- Sign-in ----------
+   The card had a max-width but the page around it did not centre, so on a wide
+   screen it sat pinned to the left inside a full-bleed band. */
+body.educbt-portal.educbt-signin {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: var(--edu-bg);
+}
+body.educbt-portal.educbt-signin .educbt-signin__wrap {
+    min-height: auto !important;
+    display: block !important;
+    padding: 0 !important;
+}
+
+/* ---------- Form polish ----------
+   Consistent field sizing everywhere, so a select does not sit a different height
+   from the text input beside it. */
+.educbt-form input[type=text],
+.educbt-form input[type=email],
+.educbt-form input[type=url],
+.educbt-form input[type=date],
+.educbt-form input[type=datetime-local],
+.educbt-form input[type=number],
+.educbt-form input[type=password],
+.educbt-form input[type=file],
+.educbt-form select,
+.educbt-form textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--edu-line);
+    border-radius: 9px;
+    font: inherit;
+    font-size: 15px;
+    line-height: 1.4;
+    background: #fff;
+    color: var(--edu-ink);
+    min-height: 42px;
+}
+.educbt-form select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='%2364726b' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 11px;
+    padding-right: 34px;
+}
+.educbt-form select[multiple] { background-image: none; padding-right: 12px; min-height: 118px; }
+.educbt-form textarea { min-height: 96px; resize: vertical; }
+
+/* A file input is a control, not a line of text — give it room and a hit area. */
+.educbt-form input[type=file] {
+    padding: 9px 12px;
+    background: var(--edu-bg);
+    cursor: pointer;
+}
+.educbt-form input[type=file]::file-selector-button {
+    border: 1px solid var(--edu-line); background: #fff; color: var(--edu-ink);
+    border-radius: 7px; padding: 6px 12px; margin-right: 12px; font: inherit;
+    font-size: 13.5px; cursor: pointer;
+}
+.educbt-form input[type=file]::file-selector-button:hover { border-color: var(--edu-accent); color: var(--edu-accent); }
+
+.educbt-form input[type=checkbox],
+.educbt-form input[type=radio] { width: auto; min-height: 0; }
+
+/* Fieldset spacing: labels sat too close to the control above them. */
+.educbt-form label { margin-bottom: 6px; }
+.educbt-grid > div { display: flex; flex-direction: column; }
+
+/* ---------- Notification actions ---------- */
+.notice-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.notice-actions__form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.notice-actions__btn { padding: 6px 11px; font-size: 12.5px; }
+.notice-report { flex: 1 1 100%; display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+.notice-report textarea {
+    width: 100%; min-width: 240px; padding: 9px 11px; border: 1px solid var(--edu-line);
+    border-radius: 8px; font: inherit; font-size: 14px;
+}
+.notice-actions__log { font-size: 12.5px; text-align: right; margin: 0; }
+.notice-pager { display: flex; gap: 10px; margin-top: 16px; }
+
+/* ---------- Question bank collapsible subject groups ---------- */
+.q-bank-group {
+    border: 1px solid var(--edu-line);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+.q-bank-group[open] {
+    border-color: var(--edu-accent-soft, #c7d2fe);
+}
+.q-bank-group__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 15px;
+    background: var(--edu-card-2, #f8fafc);
+    list-style: none;
+    user-select: none;
+}
+.q-bank-group__head::-webkit-details-marker { display: none; }
+.q-bank-group__head::before {
+    content: '▶';
+    font-size: 10px;
+    color: var(--edu-muted, #64748b);
+    transition: transform 0.15s ease;
+    display: inline-block;
+}
+.q-bank-group[open] .q-bank-group__head::before {
+    transform: rotate(90deg);
+}
+.q-bank-group__name {
+    flex: 1;
+}
+.q-bank-group__body {
+    padding: 10px 16px 16px;
+}
+.q-bank-group__body .q-item:first-child {
+    margin-top: 4px;
+}

@@ -1,0 +1,292 @@
+<?php
+
+namespace EduCBTPro\Api;
+
+use EduCBTPro\Core\Capabilities;
+use EduCBTPro\Core\Gate;
+use EduCBTPro\Core\Scope;
+use EduCBTPro\Core\TenantContext;
+use EduCBTPro\Services\QuestionApprovalService;
+use EduCBTPro\Services\QuestionAuthoringService;
+use EduCBTPro\Services\QuestionBankService;
+use EduCBTPro\Services\QuestionSetService;
+use EduCBTPro\Services\AcademicYearService;
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+/**
+ * Saving questions without losing the page.
+ *
+ * Writing forty questions meant forty full page loads, each one throwing away the
+ * subject, the class and the passage the teacher had already chosen. That is the
+ * single thing that made the question bank tiring to use, so saving happens here
+ * and the form stays where it is.
+ */
+class QuestionController {
+
+    public const NAMESPACE = 'educbt/v1';
+
+    public function init(): void {
+        add_action( 'rest_api_init', [ $this, 'register_routes' ] );
+    }
+
+    public function register_routes(): void {
+        register_rest_route(
+            self::NAMESPACE,
+            '/questions',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'create' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        // Question Set routes — the new spec-compliant question bank.
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets',
+            [
+                'methods'             => 'GET',
+                'callback'            => [ $this, 'get_set' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::VIEW_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'create_or_load_set' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)/questions',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'add_question' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)/questions/(?P<question_id>\d+)',
+            [
+                'methods'             => 'PUT',
+                'callback'            => [ $this, 'update_question' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)/questions/(?P<question_id>\d+)',
+            [
+                'methods'             => 'DELETE',
+                'callback'            => [ $this, 'delete_question' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)/questions/(?P<question_id>\d+)/duplicate',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'duplicate_question' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)/reorder',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'reorder' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+
+        register_rest_route(
+            self::NAMESPACE,
+            '/question-sets/(?P<set_id>\d+)/submit',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'submit_set' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
+            ]
+        );
+    }
+
+    public function create( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope     = new Scope();
+        $actor     = $scope->actor();
+
+        $subject_id = absint( $request->get_param( 'subject_id' ) );
+
+        if ( ! Gate::allows( Capabilities::WRITE_QUESTIONS, [ 'subject_id' => $subject_id ] ) ) {
+            return new \WP_Error( 'educbt_not_your_subject', 'You do not teach that subject.', [ 'status' => 403 ] );
+        }
+
+        $type = sanitize_key( (string) $request->get_param( 'question_type' ) );
+
+        // Someone who can approve does not need their own work approving.
+        $approval = Gate::allows( Capabilities::APPROVE_QUESTIONS )
+            ? QuestionApprovalService::APPROVED
+            : QuestionApprovalService::PENDING;
+
+        $common = [
+            'school_id'        => $school_id,
+            'subject_id'       => $subject_id,
+            'class_level'      => sanitize_text_field( (string) $request->get_param( 'class_level' ) ),
+            'question_text'    => wp_kses_post( (string) $request->get_param( 'question_text' ) ),
+            'image_reference'  => esc_url_raw( (string) $request->get_param( 'question_image' ) ),
+            'marks'            => (float) $request->get_param( 'marks' ),
+            'passage_id'       => absint( $request->get_param( 'passage_id' ) ) ?: null,
+            'status'           => 'active',
+            'approval_status'  => $approval,
+            'created_by_staff' => absint( $actor['id'] ),
+            'created_at'       => current_time( 'mysql', true ),
+        ];
+
+        if ( trim( wp_strip_all_tags( (string) $common['question_text'] ) ) === '' && $common['image_reference'] === '' ) {
+            return new \WP_Error( 'educbt_empty_question', 'The question needs text or an image.', [ 'status' => 400 ] );
+        }
+
+        global $wpdb;
+
+        if ( $type === QuestionBankService::TYPE_THEORY ) {
+            $wpdb->insert(
+                $wpdb->prefix . 'educbt_questions',
+                array_merge(
+                    $common,
+                    [
+                        'question_type' => QuestionBankService::TYPE_THEORY,
+                        'explanations'  => wp_kses_post( (string) $request->get_param( 'marking_guide' ) ),
+                    ]
+                ),
+                [ '%d', '%d', '%s', '%s', '%s', '%f', '%d', '%s', '%s', '%d', '%s', '%s', '%s' ]
+            );
+
+            return $this->result( $wpdb->insert_id, $approval, $school_id, $subject_id, $common['class_level'] );
+        }
+
+        $options = [];
+
+        foreach ( [ 'A', 'B', 'C', 'D', 'E', 'F' ] as $key ) {
+            $options[] = [
+                'text'  => (string) $request->get_param( 'option_' . $key ),
+                'image' => (string) $request->get_param( 'option_image_' . $key ),
+            ];
+        }
+
+        $authoring = new QuestionAuthoringService();
+
+        $payload = $authoring->normalise_payload(
+            [
+                'subject_id'     => $subject_id,
+                'class_level'    => $common['class_level'],
+                'difficulty'     => 'medium',
+                'marks'          => $common['marks'],
+                'question_text'  => (string) $request->get_param( 'question_text' ),
+                'question_image' => (string) $request->get_param( 'question_image' ),
+                'passage_id'     => absint( $request->get_param( 'passage_id' ) ),
+                'correct'        => (string) $request->get_param( 'correct' ),
+                'options'        => $options,
+            ]
+        );
+
+        $check = $authoring->validate_payload( $payload );
+
+        if ( ! $check['valid'] ) {
+            return new \WP_Error(
+                'educbt_invalid_question',
+                $this->explain( $check['errors'] ),
+                [ 'status' => 400 ]
+            );
+        }
+
+        $created = ( new QuestionBankService() )->create( $school_id, $authoring->payload_to_question( $payload ) );
+
+        if ( empty( $created['success'] ) ) {
+            return new \WP_Error( 'educbt_save_failed', $this->explain( $created['errors'] ?? [] ), [ 'status' => 400 ] );
+        }
+
+        $question_id = absint( $created['question_id'] );
+
+        $wpdb->update(
+            $wpdb->prefix . 'educbt_questions',
+            [
+                'approval_status'  => $approval,
+                'created_by_staff' => absint( $actor['id'] ),
+                'created_at'       => current_time( 'mysql', true ),
+                'passage_id'       => $common['passage_id'],
+            ],
+            [ 'id' => $question_id, 'school_id' => $school_id ],
+            [ '%s', '%d', '%s', '%d' ],
+            [ '%d', '%d' ]
+        );
+
+        return $this->result( $question_id, $approval, $school_id, $subject_id, $common['class_level'] );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function result( int $question_id, string $approval, int $school_id, int $subject_id, string $class_level ): array {
+        global $wpdb;
+
+        // The running count, so the form can say "Question 12" without a page load.
+        $count = absint(
+            $wpdb->get_var(
+                $wpdb->prepare(
+                    'SELECT COUNT(*) FROM ' . $wpdb->prefix . "educbt_questions
+                     WHERE school_id = %d AND subject_id = %d AND class_level = %s AND status = 'active'",
+                    $school_id,
+                    $subject_id,
+                    $class_level
+                )
+            )
+        );
+
+        return [
+            'saved'       => $question_id > 0,
+            'question_id' => $question_id,
+            'status'      => $approval,
+            'total'       => $count,
+            'next_number' => $count + 1,
+            'message'     => $approval === QuestionApprovalService::APPROVED
+                ? 'Saved and approved.'
+                : 'Submitted — waiting for approval.',
+        ];
+    }
+
+    /**
+     * @param array<int|string,string> $errors
+     */
+    private function explain( array $errors ): string {
+        $map = [
+            'no_correct_answer'                     => 'Mark which option is correct.',
+            'question_needs_text_or_image'          => 'The question needs text or an image.',
+            'at_least_two_options_required'         => 'Give at least two options.',
+            'duplicate_option_text'                 => 'Two options are identical.',
+            'correct_answer_marked_on_empty_option' => 'The correct answer is marked on an empty option.',
+        ];
+
+        $out = [];
+
+        foreach ( $errors as $code ) {
+            $out[] = $map[ (string) $code ] ?? ucfirst( str_replace( '_', ' ', (string) $code ) );
+        }
+
+        return implode( ' ', array_unique( $out ) ) ?: 'That question could not be saved.';
+    }
+}
