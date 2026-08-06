@@ -364,7 +364,7 @@ class QuestionController {
             $set['min_required'] = $service->get_min_required( $school_id, $subject_id, $level_id, $exam_type );
         }
 
-        $quotas = ( new \EduCBTPro\Services\QuestionApprovalService() )->quotas( $school_id );
+        $quotas = ( new QuestionApprovalService() )->quotas( $school_id );
 
         return [
             'success'   => true,
