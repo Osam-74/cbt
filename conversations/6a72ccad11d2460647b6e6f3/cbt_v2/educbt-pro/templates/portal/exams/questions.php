@@ -1349,7 +1349,11 @@ window.EduCBTQS = {
             html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
             html += '<span style="font-weight:700;color:var(--edu-muted)">' + (i + 1) + '.</span>';
             html += '<span class="educbt-pill educbt-pill--draft" style="font-size:.7rem">' + srcIcon + ' ' + src + '</span>';
-            html += '<span class="educbt-pill" style="font-size:.7rem">' + q.marks + ' marks</span>';
+            var totalMarks = q.marks;
+            if (q.sub_items && q.sub_items.length) {
+                totalMarks += q.sub_items.reduce(function(s, sub) { return s + (parseFloat(sub.marks) || 0); }, 0);
+            }
+            html += '<span class="educbt-pill" style="font-size:.7rem">' + totalMarks + ' marks</span>';
             html += '</div>';
             html += '<p style="margin:0 0 6px">' + esc(q.question_text || q.stem || '') + '</p>';
 
@@ -1381,7 +1385,7 @@ window.EduCBTQS = {
             if (!isObj && q.sub_items && q.sub_items.length) {
                 html += '<div style="margin-left:12px;margin-top:4px">';
                 q.sub_items.forEach(function(sub) {
-                    html += '<div style="font-size:.85rem;margin-bottom:2px">(' + (sub.label || '?') + ') ' + esc(sub.text || '') + ' <span class="educbt-muted">' + sub.marks + 'm</span></div>';
+                    html += '<div style="font-size:.85rem;margin-bottom:2px">(' + (sub.label || '?') + ') ' + esc(sub.text || '') + ' <span class="educbt-muted">' + sub.marks + ' marks</span></div>';
                 });
                 html += '</div>';
             }
@@ -1582,7 +1586,13 @@ window.EduCBTQS = {
 
         bar.style.display = 'block';
         const count = currentQuestions.length;
-        const marks = currentQuestions.reduce(function(s, q) { return s + (parseFloat(q.marks) || 0); }, 0);
+        const marks = currentQuestions.reduce(function(s, q) {
+            var m = parseFloat(q.marks) || 0;
+            if (q.sub_items && q.sub_items.length) {
+                m += q.sub_items.reduce(function(ss, sub) { return ss + (parseFloat(sub.marks) || 0); }, 0);
+            }
+            return s + m;
+        }, 0);
         const min = currentExamType === 'objective' ? API.minObjective : API.minTheory;
 
         el('qs-count-label').textContent = count + ' / ' + min + ' ' + currentExamType + ' questions';
@@ -1636,21 +1646,29 @@ window.EduCBTQS = {
     el('qs-submit-btn').addEventListener('click', function() {
         if (!currentSet) return;
         const count = currentQuestions.length;
-        const marks = currentQuestions.reduce(function(s, q) { return s + (parseFloat(q.marks) || 0); }, 0);
+        const marks = currentQuestions.reduce(function(s, q) {
+            var m = parseFloat(q.marks) || 0;
+            if (q.sub_items && q.sub_items.length) {
+                m += q.sub_items.reduce(function(ss, sub) { return ss + (parseFloat(sub.marks) || 0); }, 0);
+            }
+            return s + m;
+        }, 0);
 
-        const msg = 'Subject: ' + (subjectSel.options[subjectSel.selectedIndex] ? subjectSel.options[subjectSel.selectedIndex].text : '?') +
+        // Build a combined summary showing both objective and theory status.
+        var summary = 'Subject: ' + (subjectSel.options[subjectSel.selectedIndex] ? subjectSel.options[subjectSel.selectedIndex].text : '?') +
             '\nClass Level: ' + (classSel.options[classSel.selectedIndex] ? classSel.options[classSel.selectedIndex].text : '?') +
-            '\nType: ' + capitalize(currentExamType) +
-            '\nQuestions: ' + count +
-            '\nTotal marks: ' + marks +
-            '\n\nOnce submitted, you will not be able to edit these questions unless the Exam Officer returns them to you.';
+            '\n\nObjective: ' + (currentExamType === 'objective' ? count + ' questions / ' + API.minObjective + ' required' : (currentSet._sibling ? (currentSet._sibling.question_count || 0) + ' questions / ' + (currentSet._sibling.min_required || API.minObjective) + ' required' : '0 questions / ' + API.minObjective + ' required (not started)')) +
+            '\nTheory: ' + (currentExamType === 'theory' ? count + ' questions / ' + API.minTheory + ' required' : (currentSet._sibling ? (currentSet._sibling.question_count || 0) + ' questions / ' + (currentSet._sibling.min_required || API.minTheory) + ' required' : '0 questions / ' + API.minTheory + ' required (not started)')) +
+            '\n\nTotal marks: ' + marks +
+            '\n\nBoth Objective and Theory will be submitted together for review.' +
+            '\nOnce submitted, you will not be able to edit these questions unless the Exam Officer returns them to you.';
 
-        if (!confirm(msg)) return;
+        if (!confirm(summary)) return;
 
         apiCall('POST', 'question-sets/' + currentSet.id + '/submit')
             .then(function(r) {
                 if (r.success) {
-                    alert('Submitted for review.');
+                    alert('Submitted for review.\n\nBoth Objective and Theory sets have been submitted together.');
                     loadSet();
                 } else if (r.error === 'below_minimum' && r.shortfall) {
                     var msgs = r.shortfall.map(function(s) {

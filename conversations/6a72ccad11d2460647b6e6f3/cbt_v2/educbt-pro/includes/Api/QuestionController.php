@@ -616,10 +616,22 @@ class QuestionController {
         $result  = $service->submit_set( $school_id, $set_id, (int) $actor['id'] );
 
         if ( empty( $result['success'] ) ) {
-            $msg = $result['error'] === 'below_minimum' ? 'You need at least ' . absint( $result['min'] ) . ' questions before submitting.'
-                : ( $result['error'] === 'wrong_status' ? 'This set cannot be submitted in its current status.'
+            // Return structured data for below_minimum so the frontend can show
+            // the combined shortfall (objective + theory) instead of a generic
+            // message that only mentions the first shortfall type.
+            if ( $result['error'] === 'below_minimum' ) {
+                return [
+                    'success'   => false,
+                    'error'     => 'below_minimum',
+                    'shortfall' => $result['shortfall'] ?? [],
+                    'min'       => absint( $result['min'] ?? 0 ),
+                    'count'     => absint( $result['count'] ?? 0 ),
+                ];
+            }
+
+            $msg = $result['error'] === 'wrong_status' ? 'This set cannot be submitted in its current status.'
                 : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
-                : 'Set not found.' ) );
+                : 'Set not found.' );
             return new \WP_Error( 'educbt_submit_failed', $msg, [ 'status' => 400 ] );
         }
 
