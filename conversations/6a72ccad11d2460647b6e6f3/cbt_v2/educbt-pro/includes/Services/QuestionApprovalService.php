@@ -74,8 +74,8 @@ class QuestionApprovalService {
         $levels    = Schema::table( 'class_levels' );
         $depts     = Schema::table( 'departments' );
 
-        $where  = 'qs.school_id = %d AND (qs.status IS NULL OR qs.status <> %s)';
-        $params = [ $school_id, 'draft' ];
+        $where  = 'qs.school_id = %d';
+        $params = [ $school_id ];
 
         if ( $staff_id > 0 ) {
             $where   .= ' AND qs.teacher_id = %d';

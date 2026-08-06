@@ -40,6 +40,7 @@ class PortalActions {
         add_action( 'admin_post_educbt_remind_questions', [ $this, 'remind_questions' ] );
         add_action( 'admin_post_educbt_remind_marking', [ $this, 'remind_marking' ] );
         add_action( 'admin_post_educbt_save_quotas', [ $this, 'save_quotas' ] );
+        add_action( 'admin_post_educbt_delete_submission', [ $this, 'delete_submission' ] );
         add_action( 'admin_post_educbt_send_staff_notice', [ $this, 'send_staff_notice' ] );
         add_action( 'admin_post_educbt_notice_respond', [ $this, 'notice_respond' ] );
         add_action( 'admin_post_educbt_import_questions', [ $this, 'import_questions' ] );
@@ -783,6 +784,59 @@ class PortalActions {
         );
 
         $this->succeed( [ 'type' => 'quotas_saved' ] );
+    }
+
+    /**
+     * Delete a teacher's submission for one subject + class level.
+     * Removes the question sets and their questions for that scope.
+     */
+    public function delete_submission(): void {
+        [ $school_id ] = $this->context( 'educbt_delete_submission' );
+
+        if ( ! Gate::allows( Capabilities::APPROVE_QUESTIONS ) ) {
+            $this->fail( 'You do not have permission to delete submissions.' );
+        }
+
+        $subject_id = absint( $_POST['subject_id'] ?? 0 );
+        $staff_id   = absint( $_POST['staff_id'] ?? 0 );
+        $level_id   = absint( $_POST['level_id'] ?? 0 );
+
+        if ( $subject_id <= 0 || $staff_id <= 0 ) {
+            $this->fail( 'Invalid submission scope.' );
+        }
+
+        global $wpdb;
+
+        $sets_table    = \EduCBTPro\Core\Schema::table( 'question_sets' );
+        $questions_tbl = $wpdb->prefix . 'educbt_questions';
+
+        // Find the question set IDs for this scope.
+        $set_ids = (array) $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT id FROM {$sets_table}
+                 WHERE school_id = %d AND subject_id = %d AND teacher_id = %d"
+                . ( $level_id > 0 ? ' AND level_id = %d' : '' ),
+                $level_id > 0 ? [ $school_id, $subject_id, $staff_id, $level_id ] : [ $school_id, $subject_id, $staff_id ]
+            )
+        );
+
+        if ( empty( $set_ids ) ) {
+            $this->fail( 'No submission found for that scope.' );
+        }
+
+        $set_id_list = implode( ',', array_map( 'absint', $set_ids ) );
+
+        // Delete questions belonging to these sets.
+        $wpdb->query(
+            "DELETE FROM {$questions_tbl} WHERE question_set_id IN ({$set_id_list})"
+        );
+
+        // Delete the question sets themselves.
+        $wpdb->query(
+            "DELETE FROM {$sets_table} WHERE id IN ({$set_id_list})"
+        );
+
+        $this->succeed( [ 'type' => 'submission_deleted' ] );
     }
 
     /**

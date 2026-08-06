@@ -221,22 +221,38 @@ window.EduCBTQS = {
 <div class="educbt-card" style="margin-bottom:14px">
     <h2 style="margin:0 0 8px;font-size:1.05rem">My Submissions</h2>
     <?php foreach ( $my_submissions as $sub ): ?>
-        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--edu-line)">
-            <span style="font-weight:600"><?php echo esc_html( $sub['subject_name'] ?? 'Subject' ); ?></span>
-            <?php if ( ! empty( $sub['objective_count'] ) ): ?>
-                <span class="educbt-pill educbt-pill--draft">Objective: <?php echo (int) $sub['objective_count']; ?>/<?php echo (int) $min_objective; ?></span>
-            <?php endif; ?>
-            <?php if ( ! empty( $sub['theory_count'] ) ): ?>
-                <span class="educbt-pill educbt-pill--draft">Theory: <?php echo (int) $sub['theory_count']; ?>/<?php echo (int) $min_theory; ?></span>
-            <?php endif; ?>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:5px 0;border-bottom:1px solid var(--edu-line)">
+            <span style="font-weight:600"><?php echo esc_html( (string) ( $sub['subject_name'] ?? 'Subject' ) ); ?>
+                <?php if ( ! empty( $sub['level_name'] ) ): ?>
+                    <span style="font-weight:400;color:var(--edu-muted)"> — <?php echo esc_html( (string) $sub['level_name'] ); ?></span>
+                <?php endif; ?>
+            </span>
+            <span class="educbt-pill educbt-pill--draft">Obj: <?php echo (int) ( $sub['objective'] ?? 0 ); ?>/<?php echo (int) $min_objective; ?></span>
+            <span class="educbt-pill educbt-pill--draft">Theory: <?php echo (int) ( $sub['theory'] ?? 0 ); ?>/<?php echo (int) $min_theory; ?></span>
             <?php
+            // Determine overall status from objective_status and theory_status.
+            $obj_st = strtolower( trim( (string) ( $sub['objective_status'] ?? '' ) ) );
+            $thy_st = strtolower( trim( (string) ( $sub['theory_status'] ?? '' ) ) );
             $status_pill = 'educbt-pill--draft';
-            $status_text = 'pending';
-            if ( ! empty( $sub['sent_back'] ) ) { $status_pill = 'educbt-pill--warn'; $status_text = 'sent back'; }
-            elseif ( ! empty( $sub['all_approved'] ) ) { $status_pill = 'educbt-pill--ok'; $status_text = 'all approved'; }
-            elseif ( ! empty( $sub['pending'] ) ) { $status_text = 'awaiting approval'; }
+            $status_text = 'in progress';
+            if ( $obj_st === 'approved' && ( $thy_st === 'approved' || $thy_st === '' ) ) {
+                $status_pill = 'educbt-pill--approved';
+                $status_text = 'all approved';
+            } elseif ( $obj_st === 'returned' || $thy_st === 'returned' ) {
+                $status_pill = 'educbt-pill--draft';
+                $status_text = 'returned for revision';
+            } elseif ( $obj_st === 'submitted' || $obj_st === 'under_review' || $thy_st === 'submitted' || $thy_st === 'under_review' ) {
+                $status_pill = 'educbt-pill--submitted';
+                $status_text = 'awaiting review';
+            } elseif ( $obj_st === 'draft' || $thy_st === 'draft' ) {
+                $status_pill = 'educbt-pill--draft';
+                $status_text = 'in progress (not submitted)';
+            }
             ?>
             <span class="educbt-pill <?php echo esc_attr( $status_pill ); ?>"><?php echo esc_html( $status_text ); ?></span>
+            <?php if ( ! empty( $sub['submitted_at'] ) && $sub['submitted_at'] !== '0000-00-00 00:00:00' ): ?>
+                <span style="font-size:.75rem;color:var(--edu-muted)">submitted <?php echo esc_html( mysql2date( 'M j, g:i A', (string) $sub['submitted_at'] ) ); ?></span>
+            <?php endif; ?>
         </div>
     <?php endforeach; ?>
 </div>
@@ -318,7 +334,9 @@ window.EduCBTQS = {
         </div>
     </div>
     <div id="qs-saved-indicator" class="educbt-muted" style="font-size:.8rem"></div>
+    <?php if ( ! $is_reviewer ): ?>
     <button type="button" id="qs-submit-btn" class="educbt-btn educbt-btn--primary" disabled style="display:none">Submit for Review</button>
+    <?php endif; ?>
 </div>
 
 <script>
@@ -1580,11 +1598,17 @@ window.EduCBTQS = {
 
         if (!currentSet) {
             bar.style.display = 'none';
+            if (btn) btn.style.display = 'none';
+            return;
+        }
+
+        // Principals and exam officers can review but not submit.
+        if (API.isReviewer && btn) {
             btn.style.display = 'none';
             return;
         }
 
-        bar.style.display = 'block';
+        if (bar) bar.style.display = 'block';
         const count = currentQuestions.length;
         const marks = currentQuestions.reduce(function(s, q) {
             var m = parseFloat(q.marks) || 0;
@@ -1623,6 +1647,7 @@ window.EduCBTQS = {
         }
 
         // Submit button — enabled only when BOTH types meet their minimums.
+        if (!btn) return;
         if (isEditable()) {
             btn.style.display = 'inline-flex';
             if (count < min) {
@@ -1643,7 +1668,8 @@ window.EduCBTQS = {
 
     function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
 
-    el('qs-submit-btn').addEventListener('click', function() {
+    var _btn = el('qs-submit-btn');
+    if (_btn) _btn.addEventListener('click', function() {
         if (!currentSet) return;
         const count = currentQuestions.length;
         const marks = currentQuestions.reduce(function(s, q) {

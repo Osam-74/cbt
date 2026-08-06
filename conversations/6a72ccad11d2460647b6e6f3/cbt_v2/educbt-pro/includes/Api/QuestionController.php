@@ -612,6 +612,16 @@ class QuestionController {
         $actor     = $scope->actor();
         $set_id    = absint( $request['set_id'] ?? 0 );
 
+        // Only teachers submit questions for review — not principals, exam
+        // officers, or other school-wide roles. They review, not submit.
+        if ( $scope->is_school_wide() ) {
+            return [
+                'success' => false,
+                'error'   => 'reviewers_cannot_submit',
+                'message'  => 'Principals and exam officers review questions — they do not submit them.',
+            ];
+        }
+
         $service = new QuestionSetService();
         $result  = $service->submit_set( $school_id, $set_id, (int) $actor['id'] );
 
