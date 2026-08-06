@@ -9,7 +9,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 global $wpdb;
-$school_id = (int) $educbt['id'];
+$school_id = (int) $educbt['school_id'];
 
 // Handle reschedule submission
 $flash = \EduCBTPro\Frontend\PortalActions::flash();

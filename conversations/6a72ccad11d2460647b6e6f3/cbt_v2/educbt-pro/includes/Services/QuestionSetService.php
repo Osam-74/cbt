@@ -401,10 +401,9 @@ class QuestionSetService {
                 $seq++;
             }
 
-            // Auto-calculate parent marks from sub-questions.
-            if ( $total_marks > 0 ) {
-                $wpdb->update( $questions, [ 'marks' => $total_marks ], [ 'id' => $question_id ], [ '%f' ], [ '%d' ] );
-            }
+            // The main question keeps the marks the teacher entered. Sub-questions
+            // carry their own marks independently. Do NOT overwrite the parent
+            // with the sub-question total -- that was destroying the main mark.
         }
 
         return [ 'success' => true, 'id' => $question_id ];
@@ -558,9 +557,8 @@ class QuestionSetService {
                 $seq++;
             }
 
-            if ( $total_marks > 0 ) {
-                $wpdb->update( $questions, [ 'marks' => $total_marks ], [ 'id' => $question_id ], [ '%f' ], [ '%d' ] );
-            }
+            // The main question keeps its own marks; sub-questions carry theirs.
+            // Do NOT overwrite the parent mark with the sub-question total.
         }
 
         return [ 'success' => true ];
