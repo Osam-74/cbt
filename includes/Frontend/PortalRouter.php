@@ -5,6 +5,7 @@ namespace EduCBTPro\Frontend;
 use EduCBTPro\Core\AdminLockdown;
 use EduCBTPro\Core\Capabilities;
 use EduCBTPro\Core\Gate;
+use EduCBTPro\Core\Schema;
 use EduCBTPro\Core\Scope;
 use EduCBTPro\Core\TenantContext;
 

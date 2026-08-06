@@ -143,6 +143,29 @@ class QuestionController {
                 'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
             ]
         );
+
+        // Review queue: fetch questions for a given subject+staff+level so a
+        // reviewer can see them inline on the Approve Questions page.
+        register_rest_route(
+            self::NAMESPACE,
+            '/review-queue',
+            [
+                'methods'             => 'GET',
+                'callback'            => [ $this, 'get_review_queue' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::APPROVE_QUESTIONS ),
+            ]
+        );
+
+        // Decide (approve / send back) from the Question Bank page via REST.
+        register_rest_route(
+            self::NAMESPACE,
+            '/questions/decide',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'decide_questions' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::APPROVE_QUESTIONS ),
+            ]
+        );
     }
 
     public function create( $request ) {
@@ -311,7 +334,7 @@ class QuestionController {
     }
 
     /**
-     * GET /question-sets?subject_id=&class_id=&exam_type=
+     * GET /question-sets?subject_id=&level_id=&department_id=&exam_type=
      * Load an existing set (or return null) for the given scope.
      */
     public function get_set( $request ) {
@@ -319,37 +342,58 @@ class QuestionController {
         $scope      = new Scope();
         $actor      = $scope->actor();
         $subject_id = absint( $request->get_param( 'subject_id' ) ?? 0 );
-        $class_id   = absint( $request->get_param( 'class_id' ) ?? 0 );
         $exam_type  = sanitize_key( (string) ( $request->get_param( 'exam_type' ) ?? 'objective' ) );
 
-        if ( ! $subject_id || ! $class_id ) {
+        // A set is identified by level + department now. class_id is still accepted
+        // so an older bookmark or a deep link built from a class keeps working — it
+        // is resolved to the level it belongs to.
+        $level_id      = absint( $request->get_param( 'level_id' ) ?? 0 );
+        $department_id = absint( $request->get_param( 'department_id' ) ?? 0 );
+        $class_id      = absint( $request->get_param( 'class_id' ) ?? 0 );
+
+        if ( ! $level_id && $class_id ) {
+            $resolved      = ( new QuestionSetService() )->scope_for_class( $school_id, $class_id );
+            $level_id      = $resolved['level_id'];
+            $department_id = $resolved['department_id'];
+        }
+
+        if ( ! $subject_id || ! $level_id ) {
             return [ 'success' => false, 'error' => 'missing_params' ];
         }
 
         $ay_service = new AcademicYearService();
         $session    = $ay_service->current_session( $school_id );
-        $term       = $ay_service->current_term( $school_id );
         $session_id = absint( $session['id'] ?? 0 );
+        $term       = $ay_service->resolve_current_term( $school_id, $session_id );
         $term_id    = absint( $term['id'] ?? 0 );
 
         $service = new QuestionSetService();
-        $set     = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'] );
+        $set     = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type );
 
         $questions = [];
         $sibling   = null;
 
         if ( $set ) {
             $questions = $service->get_questions( absint( $set['id'] ) );
-            $sibling   = $service->get_sibling_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type );
+            $sibling   = $service->get_sibling_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type );
             if ( $sibling ) {
+                $sibling['question_count'] = $service->question_count( absint( $sibling['id'] ) );
+                // Always use the live quota, not the stored snapshot which may be
+                // stale from before the quota was corrected.
+                $sibling['min_required'] = $service->get_min_required( $school_id, $subject_id, $level_id, $sibling['exam_type'] );
                 $set['_sibling'] = $sibling;
             }
+            // Also fix the current set's min_required to the live value.
+            $set['min_required'] = $service->get_min_required( $school_id, $subject_id, $level_id, $exam_type );
         }
+
+        $quotas = ( new QuestionApprovalService() )->quotas( $school_id );
 
         return [
             'success'   => true,
             'set'       => $set,
             'questions' => $questions,
+            'quotas'    => $quotas,
         ];
     }
 
@@ -362,35 +406,60 @@ class QuestionController {
         $scope      = new Scope();
         $actor      = $scope->actor();
         $subject_id = absint( $request->get_param( 'subject_id' ) ?? 0 );
-        $class_id   = absint( $request->get_param( 'class_id' ) ?? 0 );
         $exam_type  = sanitize_key( (string) ( $request->get_param( 'exam_type' ) ?? 'objective' ) );
         $marks      = (float) ( $request->get_param( 'default_marks' ) ?? 1 );
 
-        if ( ! $subject_id || ! $class_id ) {
-            return new \WP_Error( 'educbt_missing_params', 'Subject and class are required.', [ 'status' => 400 ] );
+        // Same resolution as the GET: level + department identify the set, class_id
+        // is accepted and resolved so older links keep working.
+        $level_id      = absint( $request->get_param( 'level_id' ) ?? 0 );
+        $department_id = absint( $request->get_param( 'department_id' ) ?? 0 );
+        $class_id      = absint( $request->get_param( 'class_id' ) ?? 0 );
+
+        if ( ! $level_id && $class_id ) {
+            $resolved      = ( new QuestionSetService() )->scope_for_class( $school_id, $class_id );
+            $level_id      = $resolved['level_id'];
+            $department_id = $resolved['department_id'];
+        }
+
+        if ( ! $subject_id || ! $level_id ) {
+            return new \WP_Error( 'educbt_missing_params', 'Subject and class level are required.', [ 'status' => 400 ] );
         }
 
         $ay_service = new AcademicYearService();
         $session    = $ay_service->current_session( $school_id );
-        $term       = $ay_service->current_term( $school_id );
         $session_id = absint( $session['id'] ?? 0 );
+        $term       = $ay_service->resolve_current_term( $school_id, $session_id );
         $term_id    = absint( $term['id'] ?? 0 );
 
-        if ( ! $session_id || ! $term_id ) {
-            return new \WP_Error( 'educbt_no_active_term', 'No active academic session/term is set — ask an admin to mark one as current.', [ 'status' => 400 ] );
+        // Two different failures, two different instructions. Saying only "save
+        // failed" for either is what sent this bug round in circles.
+        if ( ! $session_id ) {
+            return new \WP_Error(
+                'educbt_no_active_session',
+                'No academic session is marked as current. Open School → Settings → Sessions and mark one current, then reload this page.',
+                [ 'status' => 400 ]
+            );
+        }
+
+        if ( ! $term_id ) {
+            return new \WP_Error(
+                'educbt_no_active_term',
+                'The current session has no terms yet. Add its terms under School → Settings → Sessions, then reload this page.',
+                [ 'status' => 400 ]
+            );
         }
 
         $service = new QuestionSetService();
 
         // Try to find existing first.
-        $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'] );
+        $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type );
 
         if ( ! $set ) {
-            $result = $service->create_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'], $marks );
+            $result = $service->create_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type, (int) $actor['id'], $marks );
             if ( empty( $result['id'] ) ) {
                 return new \WP_Error( 'educbt_create_failed', 'Could not create question set.', [ 'status' => 400 ] );
             }
-            $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $class_id, $exam_type, (int) $actor['id'] );
+            $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type );
         }
 
         $questions = $set ? $service->get_questions( absint( $set['id'] ) ) : [];
@@ -426,14 +495,22 @@ class QuestionController {
         $result  = $service->add_question( $school_id, $set_id, $data );
 
         if ( empty( $result['success'] ) ) {
-            $msg = $result['error'] === 'set_not_found' ? 'Question set not found.'
-                : ( $result['error'] === 'set_locked' ? 'This set is locked — it has been submitted or approved.'
-                : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
-                : ( $result['error'] === 'stem_required' ? 'Question text is required.'
-                : ( $result['error'] === 'no_correct_answer' ? 'Mark which option is correct.'
-                : ( $result['error'] === 'min_two_options' ? 'Give at least two options.'
-                : 'Could not save the question.' ) ) ) ) );
-            return new \WP_Error( 'educbt_add_failed', $msg, [ 'status' => 400 ] );
+            $code = (string) ( $result['error'] ?? '' );
+
+            $messages = [
+                'set_not_found'     => 'Question set not found.',
+                'set_locked'        => 'This set is locked — it has been submitted or approved.',
+                'not_assigned'      => 'You are not assigned to this subject/class.',
+                'stem_required'     => 'Question text is required.',
+                'no_correct_answer' => 'Mark which option is correct.',
+                'min_two_options'   => 'Give at least two options.',
+                'marks_required'    => 'Marks must be greater than zero.',
+                'insert_failed'     => 'The database rejected the question. This usually means a pending schema update — deactivate and reactivate EduCBT Pro, then try again.',
+            ];
+
+            $msg = $messages[ $code ] ?? 'Could not save the question.';
+
+            return new \WP_Error( 'educbt_add_failed', $msg, [ 'status' => 400, 'reason' => $code ] );
         }
 
         return [ 'success' => true, 'id' => absint( $result['id'] ) ];
@@ -447,23 +524,47 @@ class QuestionController {
         $set_id      = absint( $request['set_id'] ?? 0 );
         $question_id = absint( $request['question_id'] ?? 0 );
 
+        // Only pass through what was actually sent. The service treats a present
+        // `options` or `sub_items` key as "replace these", so defaulting them to an
+        // empty array meant any partial update silently deleted the options or the
+        // sub-questions it had not been given.
         $data = [
-            'stem'          => (string) ( $request->get_param( 'stem' ) ?? $request->get_param( 'question_text' ) ?? '' ),
-            'marks'         => (float) ( $request->get_param( 'marks' ) ?? 1 ),
-            'options'       => (array) ( $request->get_param( 'options' ) ?? [] ),
-            'sub_items'     => (array) ( $request->get_param( 'sub_items' ) ?? [] ),
-            'explanation'   => (string) ( $request->get_param( 'explanation' ) ?? '' ),
-            'marking_guide' => (string) ( $request->get_param( 'marking_guide' ) ?? '' ),
+            'stem'  => (string) ( $request->get_param( 'stem' ) ?? $request->get_param( 'question_text' ) ?? '' ),
+            'marks' => (float) ( $request->get_param( 'marks' ) ?? 1 ),
         ];
+
+        foreach ( [ 'options', 'sub_items' ] as $key ) {
+            $value = $request->get_param( $key );
+            if ( $value !== null ) {
+                $data[ $key ] = (array) $value;
+            }
+        }
+
+        foreach ( [ 'explanation', 'marking_guide' ] as $key ) {
+            $value = $request->get_param( $key );
+            if ( $value !== null ) {
+                $data[ $key ] = (string) $value;
+            }
+        }
 
         $service = new QuestionSetService();
         $result  = $service->update_question( $school_id, $set_id, $question_id, $data );
 
         if ( empty( $result['success'] ) ) {
-            $msg = $result['error'] === 'set_locked' ? 'This set is locked.'
-                : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
-                : 'Could not update the question.' );
-            return new \WP_Error( 'educbt_update_failed', $msg, [ 'status' => 400 ] );
+            $code = (string) ( $result['error'] ?? '' );
+
+            $messages = [
+                'set_locked'         => 'This set is locked.',
+                'not_assigned'       => 'You are not assigned to this subject/class.',
+                'set_not_found'      => 'Question set not found.',
+                'question_not_found' => 'That question is not in this set.',
+                'no_correct_answer'  => 'Mark which option is correct.',
+                'min_two_options'    => 'Give at least two options.',
+            ];
+
+            $msg = $messages[ $code ] ?? 'Could not update the question.';
+
+            return new \WP_Error( 'educbt_update_failed', $msg, [ 'status' => 400, 'reason' => $code ] );
         }
 
         return [ 'success' => true ];
@@ -534,14 +635,36 @@ class QuestionController {
         $actor     = $scope->actor();
         $set_id    = absint( $request['set_id'] ?? 0 );
 
+        // Only teachers submit questions for review — not principals, exam
+        // officers, or other school-wide roles. They review, not submit.
+        if ( $scope->is_school_wide() ) {
+            return [
+                'success' => false,
+                'error'   => 'reviewers_cannot_submit',
+                'message'  => 'Principals and exam officers review questions — they do not submit them.',
+            ];
+        }
+
         $service = new QuestionSetService();
         $result  = $service->submit_set( $school_id, $set_id, (int) $actor['id'] );
 
         if ( empty( $result['success'] ) ) {
-            $msg = $result['error'] === 'below_minimum' ? 'You need at least ' . absint( $result['min'] ) . ' questions before submitting.'
-                : ( $result['error'] === 'wrong_status' ? 'This set cannot be submitted in its current status.'
+            // Return structured data for below_minimum so the frontend can show
+            // the combined shortfall (objective + theory) instead of a generic
+            // message that only mentions the first shortfall type.
+            if ( $result['error'] === 'below_minimum' ) {
+                return [
+                    'success'   => false,
+                    'error'     => 'below_minimum',
+                    'shortfall' => $result['shortfall'] ?? [],
+                    'min'       => absint( $result['min'] ?? 0 ),
+                    'count'     => absint( $result['count'] ?? 0 ),
+                ];
+            }
+
+            $msg = $result['error'] === 'wrong_status' ? 'This set cannot be submitted in its current status.'
                 : ( $result['error'] === 'not_assigned' ? 'You are not assigned to this subject/class.'
-                : 'Set not found.' ) );
+                : 'Set not found.' );
             return new \WP_Error( 'educbt_submit_failed', $msg, [ 'status' => 400 ] );
         }
 
@@ -555,7 +678,7 @@ class QuestionController {
         $set_id    = absint( $request['set_id'] ?? 0 );
 
         $service = new QuestionSetService();
-        $result = $service->withdraw_set( $school_id, (int) $actor['id'], $set_id );
+        $result = $service->withdraw_set( $school_id, $set_id, (int) $actor['id'] );
 
         if ( empty( $result['success'] ) ) {
             $msg = $result['error'] === 'cannot_withdraw' ? 'This set cannot be withdrawn in its current status.'
@@ -574,7 +697,7 @@ class QuestionController {
         $set_id    = absint( $request['set_id'] ?? 0 );
 
         $service = new QuestionSetService();
-        $result = $service->delete_set( $school_id, (int) $actor['id'], $set_id );
+        $result = $service->delete_set( $school_id, $set_id, (int) $actor['id'] );
 
         if ( empty( $result['success'] ) ) {
             $msg = $result['error'] === 'cannot_delete' ? 'Only draft or returned sets can be deleted.'
@@ -584,5 +707,72 @@ class QuestionController {
         }
 
         return [ 'success' => true, 'message' => 'Draft set deleted.' ];
+    }
+
+    /**
+     * GET /review-queue?subject_id=X&staff_id=Y&level_id=Z
+     * Returns questions for inline review on the Approve Questions page.
+     */
+    public function get_review_queue( $request ) {
+        $school_id  = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $subject_id = absint( $request->get_param( 'subject_id' ) );
+        $staff_id   = absint( $request->get_param( 'staff_id' ) );
+        $level_id   = absint( $request->get_param( 'level_id' ) );
+
+        if ( $school_id <= 0 || $subject_id <= 0 || $staff_id <= 0 ) {
+            return new \WP_Error( 'educbt_missing_params', 'Subject, staff and school are required.', [ 'status' => 400 ] );
+        }
+
+        $service = new QuestionApprovalService();
+        $rows    = $service->review_queue( $school_id, $subject_id, $staff_id, $level_id );
+
+        return [ 'success' => true, 'questions' => $rows ];
+    }
+
+    /**
+     * POST /questions/decide
+     * Approve or send back questions from the Question Bank page.
+     */
+    public function decide_questions( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope     = new Scope();
+        $actor     = $scope->actor();
+
+        $subject_id   = absint( $request->get_param( 'subject_id' ) );
+        $staff_id     = absint( $request->get_param( 'staff_id' ) );
+        $decision     = sanitize_key( (string) $request->get_param( 'decision' ) );
+        $note         = (string) $request->get_param( 'note' );
+        $question_ids = array_map( 'absint', (array) $request->get_param( 'question_ids' ) );
+
+        if ( ! in_array( $decision, [ 'approve', 'revision', 'pending' ], true ) ) {
+            return new \WP_Error( 'educbt_invalid_decision', 'Decision must be approve or revision.', [ 'status' => 400 ] );
+        }
+
+        $decision_const = $decision === 'approve'
+            ? QuestionApprovalService::APPROVED
+            : ( $decision === 'revision' ? QuestionApprovalService::REVISION : QuestionApprovalService::PENDING );
+
+        $result = ( new QuestionApprovalService() )->decide(
+            $school_id,
+            $subject_id,
+            $staff_id,
+            $decision_const,
+            $note,
+            (int) $actor['id'],
+            $question_ids
+        );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = ( $result['error'] ?? '' ) === 'note_required'
+                ? 'Say what needs changing before sending work back.'
+                : 'That decision could not be recorded.';
+            return new \WP_Error( 'educbt_decide_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [
+            'success' => true,
+            'changed' => (int) $result['changed'],
+            'sets'    => (int) ( $result['sets'] ?? 0 ),
+        ];
     }
 }

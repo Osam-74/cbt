@@ -167,7 +167,6 @@ class Capabilities {
             self::VIEW_QUESTIONS,
             self::WRITE_QUESTIONS,
             self::VIEW_EXAMS,
-            self::INVIGILATE,
             self::RELEASE_ACCESS_CODE,
             self::ENTER_SCORES,
             self::SUBMIT_SCORES,
@@ -180,6 +179,7 @@ class Capabilities {
         $exam_officer = array_merge(
             $teacher,
             [
+                self::INVIGILATE,
                 self::APPROVE_QUESTIONS,
                 self::MANAGE_EXAM_SERIES,
                 self::MANAGE_PAPERS,
