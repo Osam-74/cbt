@@ -94,12 +94,13 @@ class StudentRegistrationService {
                 'student_id'        => $admission_number,
                 'first_name'        => $first,
                 'last_name'         => $last,
+                'full_name'         => trim( $first . ' ' . $last ),
                 'gender'            => sanitize_text_field( (string) ( $data['gender'] ?? '' ) ),
                 'date_of_birth'     => sanitize_text_field( (string) ( $data['date_of_birth'] ?? '' ) ),
                 'passport_photo'    => esc_url_raw( (string) ( $data['passport_photo'] ?? '' ) ),
                 'status'            => 'active',
             ],
-            [ '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ]
+            [ '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ]
         );
 
         // A failed insert here used to be invisible: the enrolment was still written,
@@ -253,20 +254,65 @@ class StudentRegistrationService {
 
         $email = sanitize_title( str_replace( '/', '-', $admission_number ) ) . '@students.invalid';
 
-        $user_id = wp_insert_user(
-            [
-                'user_login'   => $username,
+        // Check if a WP user already exists for this username (from a previously
+        // withdrawn/deleted student whose WP account was never cleaned up).
+        // If so, reuse it: reset the password and update the name/email so the
+        // new student can log in with their surname.
+        $existing_user = get_user_by( 'login', $username );
+
+        if ( ! $existing_user ) {
+            // Also check by email — the username might have been sanitized differently.
+            $existing_user = get_user_by( 'email', $email );
+        }
+
+        if ( $existing_user ) {
+            $user_id = $existing_user->ID;
+
+            wp_update_user( [
+                'ID'           => $user_id,
                 'user_pass'    => $password,
                 'user_email'   => $email,
                 'first_name'   => $first,
                 'last_name'    => $last,
                 'display_name' => trim( $first . ' ' . $last ),
                 'role'         => Capabilities::ROLE_STUDENT,
-            ]
-        );
+            ] );
+        } else {
+            $user_id = wp_insert_user(
+                [
+                    'user_login'   => $username,
+                    'user_pass'    => $password,
+                    'user_email'   => $email,
+                    'first_name'   => $first,
+                    'last_name'    => $last,
+                    'display_name' => trim( $first . ' ' . $last ),
+                    'role'         => Capabilities::ROLE_STUDENT,
+                ]
+            );
 
-        if ( is_wp_error( $user_id ) ) {
-            return [ 'username' => $username, 'initial_password' => '', 'must_change' => false, 'user_id' => 0 ];
+            if ( is_wp_error( $user_id ) ) {
+                // Last resort: try with a sanitized username (slashes stripped).
+                $safe_username = sanitize_user( $username, true );
+                $safe_email    = sanitize_title( str_replace( '/', '-', $admission_number ) ) . '-' . $student_id . '@students.invalid';
+
+                $user_id = wp_insert_user(
+                    [
+                        'user_login'   => $safe_username,
+                        'user_pass'    => $password,
+                        'user_email'   => $safe_email,
+                        'first_name'   => $first,
+                        'last_name'    => $last,
+                        'display_name' => trim( $first . ' ' . $last ),
+                        'role'         => Capabilities::ROLE_STUDENT,
+                    ]
+                );
+
+                if ( is_wp_error( $user_id ) ) {
+                    return [ 'username' => $username, 'initial_password' => '', 'must_change' => false, 'user_id' => 0 ];
+                }
+
+                $username = $safe_username;
+            }
         }
 
         $user_id = absint( $user_id );
@@ -308,6 +354,16 @@ class StudentRegistrationService {
         }
 
         return $password;
+    }
+
+    /**
+     * Public wrapper for provision_login so other services (like the data
+     * integrity repair) can create login accounts for restored students.
+     *
+     * @return array{username:string,initial_password:string,must_change:bool,user_id:int}
+     */
+    public function provision_login_public( int $school_id, int $student_id, string $admission_number, string $first, string $last ): array {
+        return $this->provision_login( $school_id, $student_id, $admission_number, $first, $last );
     }
 
     /**

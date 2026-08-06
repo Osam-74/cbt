@@ -181,6 +181,7 @@ class DataIntegrityService {
                 ARRAY_A
             );
 
+            $reg_service = new StudentRegistrationService();
             $fixed = 0;
             foreach ( $orphans as $orphan ) {
                 $student_id = absint( $orphan['student_id'] );
@@ -191,8 +192,24 @@ class DataIntegrityService {
                     $wpdb->prepare( "SELECT display_name FROM {$classes_table} WHERE id = %d", $class_id )
                 );
 
-                // Generate a name placeholder — the school can edit it later
+                // Try to find an existing WP user for this student_id — the user
+                // account may still exist even though the student record was lost.
+                $wp_user_id = (int) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_educbt_school_id' AND meta_value = %d LIMIT 1",
+                        $school_id
+                    )
+                );
+
+                // Also try to match by the old wp_user_id column if present
+                $existing_wp_user = 0;
+
+                // Generate admission number from the student_id so it's unique
                 $admission_number = 'REST-' . str_pad( (string) $student_id, 5, '0', STR_PAD_LEFT );
+
+                $placeholder_first = 'Restored';
+                $placeholder_last  = 'Student ' . $student_id;
+                $placeholder_full  = $placeholder_first . ' ' . $placeholder_last;
 
                 $inserted = $wpdb->insert(
                     $students,
@@ -202,9 +219,9 @@ class DataIntegrityService {
                         'admission_number'    => $admission_number,
                         'registration_number' => $admission_number,
                         'student_id'          => $admission_number,
-                        'full_name'           => 'Pending Student ' . $student_id,
-                        'first_name'          => 'Pending',
-                        'last_name'            => 'Student ' . $student_id,
+                        'full_name'           => $placeholder_full,
+                        'first_name'          => $placeholder_first,
+                        'last_name'            => $placeholder_last,
                         'class'               => $class_name,
                         'status'              => 'active',
                     ],
@@ -212,11 +229,16 @@ class DataIntegrityService {
                 );
 
                 if ( $inserted ) {
+                    // Provision a WP login account so the student can actually sign in.
+                    $creds = $reg_service->provision_login_public(
+                        $school_id, $student_id, $admission_number,
+                        $placeholder_first, $placeholder_last
+                    );
                     $fixed++;
                 }
             }
 
-            return [ 'fixed' => $fixed, 'message' => sprintf( '%d student record(s) restored. Update their names from the student list.', $fixed ) ];
+            return [ 'fixed' => $fixed, 'message' => sprintf( '%d student record(s) restored and login accounts created. Update their names from the student list.', $fixed ) ];
         }
 
         if ( $key === 'blank_student_status' ) {

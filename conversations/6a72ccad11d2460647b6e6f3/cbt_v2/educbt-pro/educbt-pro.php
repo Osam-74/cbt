@@ -3,7 +3,7 @@
  * Plugin Name: EduCBT Pro
  * Plugin URI:  https://deodevs.com/educbt-pro
  * Description: Enterprise Multi-School CBT, School Management, Results & Academic Intelligence Platform for WordPress.
- * Version:     3.5.2
+ * Version:     3.5.3
  * Author:      DeoDevs Team
  * Author URI:  https://deodevs.com
  * Text Domain: educbt-pro

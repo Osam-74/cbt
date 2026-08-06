@@ -352,5 +352,10 @@ $type = (string) ( $result['type'] ?? '' );
     <?php elseif ( $type === 'assignment' ) : ?>
         <h2>Assignment saved</h2>
         <p>The teacher now has access to that class or subject.</p>
+
+    <?php elseif ( $type === 'student_added_pending' ) : ?>
+        <h2>Student added</h2>
+        <p><?php echo esc_html( (string) ( $result['message'] ?? 'Student added as pending approval.' ) ); ?></p>
+
     <?php endif; ?>
 </div>

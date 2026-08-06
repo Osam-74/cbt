@@ -1966,12 +1966,28 @@ class PortalActions {
             $invite = (string) ( $linked['invite_token'] ?? '' );
         }
 
+        $password = (string) ( $result['credentials']['initial_password'] ?? '' );
+
+        if ( $password === '' ) {
+            // The student record was saved but the WP login could not be created.
+            // Tell the school explicitly so they can reset the password later.
+            $this->succeed(
+                [
+                    'type'             => 'student',
+                    'name'             => trim( (string) wp_unslash( $_POST['first_name'] ?? '' ) . ' ' . (string) wp_unslash( $_POST['last_name'] ?? '' ) ),
+                    'admission_number' => (string) $result['admission_number'],
+                    'password'         => '(login setup failed — use Reset Password)',
+                    'invite_token'     => $invite,
+                ]
+            );
+        }
+
         $this->succeed(
             [
                 'type'             => 'student',
                 'name'             => trim( (string) wp_unslash( $_POST['first_name'] ?? '' ) . ' ' . (string) wp_unslash( $_POST['last_name'] ?? '' ) ),
                 'admission_number' => (string) $result['admission_number'],
-                'password'         => (string) ( $result['credentials']['initial_password'] ?? '' ),
+                'password'         => $password,
                 'invite_token'     => $invite,
             ]
         );
