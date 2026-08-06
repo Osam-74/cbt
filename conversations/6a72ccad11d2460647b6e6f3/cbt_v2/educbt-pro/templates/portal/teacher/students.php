@@ -210,6 +210,19 @@ $educbt_body = static function () use ( $flash, $my_classes, $view_class, $stude
                     <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:12px">Save changes</button>
                 </form>
             </details>
+
+            <details style="margin-top:16px">
+                <summary style="cursor:pointer;font-weight:600;font-size:14px;color:#b91c1c">Reset password</summary>
+                <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:12px"
+                      onsubmit="return confirm('Reset this student\'s password to their surname?');">
+                    <input type="hidden" name="action" value="educbt_reset_student_password">
+                    <input type="hidden" name="student_id" value="<?php echo esc_attr( (string) $s['id'] ); ?>">
+                    <input type="hidden" name="_wp_http_referer" value="<?php echo esc_attr( add_query_arg( [ 'class' => $view_class, 'student' => $view_student ], home_url( '/portal/teacher/students/' ) ) ); ?>">
+                    <?php wp_nonce_field( 'educbt_reset_student_password' ); ?>
+                    <p class="educbt-muted" style="font-size:.85rem">The student's password will be reset to their surname. They will be asked to change it at next sign-in.</p>
+                    <button type="submit" class="educbt-btn" style="color:#b91c1c;border-color:#f3c9c9">Reset password</button>
+                </form>
+            </details>
         </section>
 
     <?php

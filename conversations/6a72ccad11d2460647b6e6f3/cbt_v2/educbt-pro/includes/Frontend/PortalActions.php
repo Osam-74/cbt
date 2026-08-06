@@ -3167,7 +3167,9 @@ class PortalActions {
             $this->fail( 'Could not update the student record.', $redirect );
         }
 
-        $this->succeed( [ 'type' => 'student_update' ], $redirect );
+        $first = sanitize_text_field( (string) wp_unslash( $_POST['first_name'] ?? '' ) );
+        $last  = sanitize_text_field( (string) wp_unslash( $_POST['last_name'] ?? '' ) );
+        $this->succeed( [ 'type' => 'student_updated', 'name' => trim( $first . ' ' . $last ) ], $redirect );
     }
 
     /**
