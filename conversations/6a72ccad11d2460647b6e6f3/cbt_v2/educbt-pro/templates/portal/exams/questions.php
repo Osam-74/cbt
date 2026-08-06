@@ -1607,7 +1607,7 @@ window.EduCBTQS = {
         if (currentSet._sibling) {
             var sibCount = parseInt(currentSet._sibling.question_count || 0);
             var sibMin = parseInt(currentSet._sibling.min_required || (currentSet._sibling.exam_type === 'objective' ? API.minObjective : API.minTheory));
-            sibLabel = capitalize(currentSet._sibling.exam_type) + ': ' + sibCount + '/' + sibMin + ' (' + currentSet._sibling.status + ')';
+            var sibLabel = capitalize(currentSet._sibling.exam_type) + ': ' + sibCount + '/' + sibMin + ' (' + currentSet._sibling.status + ')';
             el('qs-sibling-label').textContent = sibLabel;
             if (sibCount < sibMin && (currentSet._sibling.status === 'draft' || currentSet._sibling.status === 'returned')) {
                 siblingShort = true;
