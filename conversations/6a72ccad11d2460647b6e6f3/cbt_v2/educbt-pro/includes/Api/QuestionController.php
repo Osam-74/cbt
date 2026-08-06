@@ -354,14 +354,23 @@ class QuestionController {
             $questions = $service->get_questions( absint( $set['id'] ) );
             $sibling   = $service->get_sibling_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type );
             if ( $sibling ) {
+                $sibling['question_count'] = $service->question_count( absint( $sibling['id'] ) );
+                // Always use the live quota, not the stored snapshot which may be
+                // stale from before the quota was corrected.
+                $sibling['min_required'] = $service->get_min_required( $school_id, $subject_id, $level_id, $sibling['exam_type'] );
                 $set['_sibling'] = $sibling;
             }
+            // Also fix the current set's min_required to the live value.
+            $set['min_required'] = $service->get_min_required( $school_id, $subject_id, $level_id, $exam_type );
         }
+
+        $quotas = ( new \EduCBTPro\Services\QuestionApprovalService() )->quotas( $school_id );
 
         return [
             'success'   => true,
             'set'       => $set,
             'questions' => $questions,
+            'quotas'    => $quotas,
         ];
     }
 

@@ -541,6 +541,12 @@ window.EduCBTQS = {
         })
             .then(function(r) {
                 if (!r.success) { showSaveError(r.error || 'Could not load this set'); return; }
+                // Update live quotas from the API so the frontend always uses the
+                // current school's configured minimums, not a stale page-load value.
+                if (r.quotas) {
+                    API.minObjective = parseInt(r.quotas.objective) || API.minObjective;
+                    API.minTheory = parseInt(r.quotas.theory) || API.minTheory;
+                }
                 currentSet = r.set;
                 currentQuestions = r.questions || [];
                 renderPreview();
@@ -1585,17 +1591,36 @@ window.EduCBTQS = {
         const pct = min > 0 ? Math.min(100, (count / min) * 100) : 100;
         el('qs-progress-bar').style.width = pct + '%';
 
-        // Sibling set indicator
+        // Sibling set indicator with question count
+        var siblingShort = false;
+        var siblingMsg = '';
         if (currentSet._sibling) {
-            el('qs-sibling-label').textContent = capitalize(currentSet._sibling.exam_type) + ': ' + currentSet._sibling.status;
+            var sibCount = parseInt(currentSet._sibling.question_count || 0);
+            var sibMin = parseInt(currentSet._sibling.min_required || (currentSet._sibling.exam_type === 'objective' ? API.minObjective : API.minTheory));
+            sibLabel = capitalize(currentSet._sibling.exam_type) + ': ' + sibCount + '/' + sibMin + ' (' + currentSet._sibling.status + ')';
+            el('qs-sibling-label').textContent = sibLabel;
+            if (sibCount < sibMin && (currentSet._sibling.status === 'draft' || currentSet._sibling.status === 'returned')) {
+                siblingShort = true;
+                siblingMsg = 'Theory and Objective submit together. ' + capitalize(currentSet._sibling.exam_type) + ' needs ' + (sibMin - sibCount) + ' more question' + ((sibMin - sibCount) > 1 ? 's' : '') + '.';
+            }
+        } else {
+            // No sibling set exists yet — the other exam type has not been started.
+            var sibType = currentExamType === 'objective' ? 'theory' : 'objective';
+            var sibMin = sibType === 'objective' ? API.minObjective : API.minTheory;
+            el('qs-sibling-label').textContent = capitalize(sibType) + ': 0/' + sibMin + ' (not started)';
+            siblingShort = true;
+            siblingMsg = 'Theory and Objective submit together. Create the ' + sibType + ' set and add at least ' + sibMin + ' question' + (sibMin > 1 ? 's' : '') + '.';
         }
 
-        // Submit button
+        // Submit button — enabled only when BOTH types meet their minimums.
         if (isEditable()) {
             btn.style.display = 'inline-flex';
             if (count < min) {
                 btn.disabled = true;
-                btn.title = 'Add ' + (min - count) + ' more question' + (min - count > 1 ? 's' : '') + ' to submit.';
+                btn.title = 'Add ' + (min - count) + ' more ' + currentExamType + ' question' + (min - count > 1 ? 's' : '') + ' to submit.';
+            } else if (siblingShort) {
+                btn.disabled = true;
+                btn.title = siblingMsg;
             } else {
                 btn.disabled = false;
                 btn.title = '';
@@ -1627,6 +1652,11 @@ window.EduCBTQS = {
                 if (r.success) {
                     alert('Submitted for review.');
                     loadSet();
+                } else if (r.error === 'below_minimum' && r.shortfall) {
+                    var msgs = r.shortfall.map(function(s) {
+                        return capitalize(s.exam_type) + ': ' + s.count + '/' + s.min + ' questions (add ' + (s.min - s.count) + ' more)';
+                    });
+                    alert('Cannot submit yet. Theory and Objective submit together:\n\n' + msgs.join('\n'));
                 } else {
                     alert('Could not submit: ' + (r.error || 'unknown error'));
                 }
@@ -1650,6 +1680,10 @@ window.EduCBTQS = {
                 if (!r.success) {
                     showSaveError(r.error || 'Saved, but the list could not be reloaded — refresh the page');
                     return;
+                }
+                if (r.quotas) {
+                    API.minObjective = parseInt(r.quotas.objective) || API.minObjective;
+                    API.minTheory = parseInt(r.quotas.theory) || API.minTheory;
                 }
                 currentSet = r.set;
                 currentQuestions = r.questions || [];

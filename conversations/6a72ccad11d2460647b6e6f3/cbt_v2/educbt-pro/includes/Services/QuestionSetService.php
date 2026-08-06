@@ -741,7 +741,7 @@ class QuestionSetService {
             }
 
             $count = $this->question_count( absint( $candidate['id'] ) );
-            $min   = absint( $candidate['min_required'] );
+            $min   = $this->get_min_required( $school_id, absint( $set['subject_id'] ), absint( $set['level_id'] ), $candidate['exam_type'] );
 
             if ( $count < $min ) {
                 $shortfall[] = [ 'exam_type' => $candidate['exam_type'], 'count' => $count, 'min' => $min ];
@@ -1043,7 +1043,7 @@ class QuestionSetService {
 
         $set = $wpdb->get_row(
             $wpdb->prepare(
-                "SELECT id, status, exam_type FROM {$table}
+                "SELECT id, status, exam_type, min_required FROM {$table}
                  WHERE school_id = %d AND session_id = %d AND term_id = %d
                    AND subject_id = %d AND level_id = %d AND department_id = %d AND exam_type = %s
                  LIMIT 1",
@@ -1059,7 +1059,7 @@ class QuestionSetService {
      * Get the configured minimum for a subject+class+exam_type.
      * Falls back to the school's minimum_questions_per_subject.
      */
-    private function get_min_required( int $school_id, int $subject_id, int $level_id, string $exam_type ): int {
+    public function get_min_required( int $school_id, int $subject_id, int $level_id, string $exam_type ): int {
         // The quota the school actually configures is per exam type and lives in
         // QuestionApprovalService. This used to read minimum_questions_per_subject
         // instead and applied one number to BOTH types, so a school that set 4
