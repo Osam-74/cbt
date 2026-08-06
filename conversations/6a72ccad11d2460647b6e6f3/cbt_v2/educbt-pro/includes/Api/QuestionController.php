@@ -143,6 +143,29 @@ class QuestionController {
                 'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::WRITE_QUESTIONS ),
             ]
         );
+
+        // Review queue: fetch questions for a given subject+staff+level so a
+        // reviewer can see them inline on the Approve Questions page.
+        register_rest_route(
+            self::NAMESPACE,
+            '/review-queue',
+            [
+                'methods'             => 'GET',
+                'callback'            => [ $this, 'get_review_queue' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::APPROVE_QUESTIONS ),
+            ]
+        );
+
+        // Decide (approve / send back) from the Question Bank page via REST.
+        register_rest_route(
+            self::NAMESPACE,
+            '/questions/decide',
+            [
+                'methods'             => 'POST',
+                'callback'            => [ $this, 'decide_questions' ],
+                'permission_callback' => static fn(): bool => is_user_logged_in() && Gate::allows( Capabilities::APPROVE_QUESTIONS ),
+            ]
+        );
     }
 
     public function create( $request ) {
@@ -684,5 +707,72 @@ class QuestionController {
         }
 
         return [ 'success' => true, 'message' => 'Draft set deleted.' ];
+    }
+
+    /**
+     * GET /review-queue?subject_id=X&staff_id=Y&level_id=Z
+     * Returns questions for inline review on the Approve Questions page.
+     */
+    public function get_review_queue( $request ) {
+        $school_id  = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $subject_id = absint( $request->get_param( 'subject_id' ) );
+        $staff_id   = absint( $request->get_param( 'staff_id' ) );
+        $level_id   = absint( $request->get_param( 'level_id' ) );
+
+        if ( $school_id <= 0 || $subject_id <= 0 || $staff_id <= 0 ) {
+            return new \WP_Error( 'educbt_missing_params', 'Subject, staff and school are required.', [ 'status' => 400 ] );
+        }
+
+        $service = new QuestionApprovalService();
+        $rows    = $service->review_queue( $school_id, $subject_id, $staff_id, $level_id );
+
+        return [ 'success' => true, 'questions' => $rows ];
+    }
+
+    /**
+     * POST /questions/decide
+     * Approve or send back questions from the Question Bank page.
+     */
+    public function decide_questions( $request ) {
+        $school_id = absint( ( new TenantContext() )->get_school_id() ?? 0 );
+        $scope     = new Scope();
+        $actor     = $scope->actor();
+
+        $subject_id   = absint( $request->get_param( 'subject_id' ) );
+        $staff_id     = absint( $request->get_param( 'staff_id' ) );
+        $decision     = sanitize_key( (string) $request->get_param( 'decision' ) );
+        $note         = (string) $request->get_param( 'note' );
+        $question_ids = array_map( 'absint', (array) $request->get_param( 'question_ids' ) );
+
+        if ( ! in_array( $decision, [ 'approve', 'revision', 'pending' ], true ) ) {
+            return new \WP_Error( 'educbt_invalid_decision', 'Decision must be approve or revision.', [ 'status' => 400 ] );
+        }
+
+        $decision_const = $decision === 'approve'
+            ? QuestionApprovalService::APPROVED
+            : ( $decision === 'revision' ? QuestionApprovalService::REVISION : QuestionApprovalService::PENDING );
+
+        $result = ( new QuestionApprovalService() )->decide(
+            $school_id,
+            $subject_id,
+            $staff_id,
+            $decision_const,
+            $note,
+            (int) $actor['id'],
+            $question_ids
+        );
+
+        if ( empty( $result['success'] ) ) {
+            $msg = ( $result['error'] ?? '' ) === 'note_required'
+                ? 'Say what needs changing before sending work back.'
+                : 'That decision could not be recorded.';
+            return new \WP_Error( 'educbt_decide_failed', $msg, [ 'status' => 400 ] );
+        }
+
+        return [
+            'success' => true,
+            'changed' => (int) $result['changed'],
+            'sets'    => (int) ( $result['sets'] ?? 0 ),
+        ];
     }
 }

@@ -1353,7 +1353,14 @@ window.EduCBTQS = {
         const editable = isEditable();
         let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
         html += '<h3 style="margin:0;font-size:1rem">Questions in this set (' + currentQuestions.length + ')</h3>';
-        html += '<input type="text" id="qs-search" class="educbt-input" placeholder="Search…" style="font-size:.85rem;width:200px"></div>';
+        html += '<div style="display:flex;gap:6px;align-items:center">';
+        if (API.isReviewer && currentSet && (currentSet.status === 'submitted' || currentSet.status === 'under_review' || currentSet.status === 'returned')) {
+            html += '<button type="button" class="educbt-btn" onclick="qsSelectAll(this)" style="font-size:.8rem">Select All</button>';
+            html += '<button type="button" class="educbt-btn" onclick="qsApproveSelected(this)" style="font-size:.8rem;background:#16a34a;color:#fff">Approve Selected</button>';
+            html += '<button type="button" class="educbt-btn" onclick="qsSendBack(this)" style="font-size:.8rem;color:#dc2626;border-color:#dc2626">Send Back</button>';
+        }
+        html += '<input type="text" id="qs-search" class="educbt-input" placeholder="Search..." style="font-size:.85rem;width:200px">';
+        html += '</div></div>';
 
         currentQuestions.forEach(function(q, i) {
             const isObj = q.question_type === 'single_choice' || q.question_type === 'objective';
@@ -1361,11 +1368,23 @@ window.EduCBTQS = {
             const srcIcon = src === 'paste' ? '📋' : (src === 'import' ? '📥' : '✏');
             const reviewerNote = q.reviewer_comment || '';
 
+            var showReviewCheck = API.isReviewer && currentSet && (currentSet.status === 'submitted' || currentSet.status === 'under_review' || currentSet.status === 'returned');
+            var approvalPill = '';
+            if (API.isReviewer && q.approval_status) {
+                var ap = q.approval_status;
+                var apClass = ap === 'approved' ? 'educbt-pill--approved' : (ap === 'revision' ? 'educbt-pill--draft' : 'educbt-pill--submitted');
+                var apText = ap === 'approved' ? 'approved' : (ap === 'revision' ? 'sent back' : 'pending');
+                approvalPill = '<span class="educbt-pill ' + apClass + '" style="font-size:.7rem">' + apText + '</span>';
+            }
             html += '<div class="qs-card" data-qid="' + q.id + '" style="border:1px solid var(--edu-line);border-radius:8px;padding:12px;margin-bottom:8px' + (reviewerNote ? ';border-color:#f59e0b' : '') + '">';
             html += '<div style="display:flex;justify-content:space-between;align-items:flex-start">';
+            if (showReviewCheck) {
+                html += '<input type="checkbox" class="qs-review-check" value="' + q.id + '" style="margin-top:4px;margin-right:8px">';
+            }
             html += '<div style="flex:1">';
             html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
             html += '<span style="font-weight:700;color:var(--edu-muted)">' + (i + 1) + '.</span>';
+            if (approvalPill) html += approvalPill;
             html += '<span class="educbt-pill educbt-pill--draft" style="font-size:.7rem">' + srcIcon + ' ' + src + '</span>';
             var totalMarks = q.marks;
             if (q.sub_items && q.sub_items.length) {
@@ -1463,6 +1482,77 @@ window.EduCBTQS = {
                 });
             });
         }
+    }
+
+    // ---- Reviewer actions on Question Bank ----
+
+    window.qsSelectAll = function(btn) {
+        var list = el('qs-question-list');
+        var checks = list.querySelectorAll('.qs-review-check');
+        if (!checks.length) return;
+        var allChecked = Array.prototype.every.call(checks, function(c) { return c.checked; });
+        Array.prototype.forEach.call(checks, function(c) { c.checked = !allChecked; });
+        btn.textContent = allChecked ? 'Select All' : 'Deselect All';
+    };
+
+    window.qsApproveSelected = function(btn) {
+        qsDecide(btn, 'approve');
+    };
+
+    window.qsSendBack = function(btn) {
+        var list = el('qs-question-list');
+        var checked = list.querySelectorAll('.qs-review-check:checked');
+        if (!checked.length) {
+            alert('Select at least one question to send back.');
+            return;
+        }
+        var note = prompt('What needs fixing? (required)');
+        if (note === null) return;
+        if (!note.trim()) {
+            alert('You must explain what needs fixing before sending back.');
+            return;
+        }
+        qsDecide(btn, 'revision', note);
+    };
+
+    function qsDecide(btn, decision, note) {
+        var list = el('qs-question-list');
+        var checks = list.querySelectorAll('.qs-review-check:checked');
+        var questionIds = [];
+        checks.forEach(function(c) { questionIds.push(parseInt(c.value)); });
+
+        if (decision === 'approve' && !questionIds.length) {
+            alert('Select at least one question to approve.');
+            return;
+        }
+
+        // Find staff_id from the current set's author
+        if (!currentSet) return;
+        var staffId = currentSet.staff_id || currentSet.teacher_id || 0;
+        if (!staffId) {
+            alert('Cannot determine the teacher for this submission.');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Working...';
+
+        apiCall('POST', 'questions/decide', {
+            subject_id: parseInt(currentSet.subject_id || subjectSel.value),
+            staff_id: parseInt(staffId),
+            decision: decision,
+            note: note || '',
+            question_ids: questionIds
+        }).then(function(data) {
+            if (data.success) {
+                alert('Done - ' + (data.changed || 0) + ' question(s) updated.');
+                refreshQuestions();
+            } else {
+                alert(data.error || data.message || 'Something went wrong.');
+                btn.disabled = false;
+                btn.textContent = decision === 'approve' ? 'Approve Selected' : 'Send Back';
+            }
+        });
     }
 
     function openInlineEdit(q) {
