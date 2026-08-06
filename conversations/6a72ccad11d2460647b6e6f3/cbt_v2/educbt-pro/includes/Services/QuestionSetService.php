@@ -212,7 +212,7 @@ class QuestionSetService {
      * @param array<string,mixed> $data Question data
      * @return array{success:bool,id?:int,error?:string}
      */
-    public function add_question( int $school_id, int $set_id, array $data ): array {
+    public function add_question( int $school_id, int $set_id, array $data, int $teacher_id = 0, bool $can_approve = false ): array {
         global $wpdb;
 
         // Verify the set exists and is editable.
@@ -273,7 +273,8 @@ class QuestionSetService {
             'marks'            => $marks,
             'difficulty'       => sanitize_key( (string) ( $data['difficulty'] ?? 'medium' ) ),
             'status'           => 'active',
-            'approval_status'  => 'approved',
+            'approval_status'  => $can_approve ? 'approved' : 'pending',
+            'created_by_staff' => $teacher_id > 0 ? $teacher_id : (int) ( $set['teacher_id'] ?? 0 ),
             'passage_id'       => $passage_id,
             'explanations'     => $explanation ?: null,
             'image_reference'  => $image_ref,
@@ -281,7 +282,7 @@ class QuestionSetService {
             'sequence'         => $next_seq,
         ];
 
-        $format = [ '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%d' ];
+        $format = [ '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%d' ];
 
         // Theory questions: save marking guide.
         if ( $question_type === 'theory' ) {
@@ -700,6 +701,8 @@ class QuestionSetService {
     public function submit_set( int $school_id, int $set_id, int $teacher_id ): array {
         global $wpdb;
 
+        $questions_table = $wpdb->prefix . 'educbt_questions';
+
         $set = $this->get_set( $school_id, $set_id );
         if ( ! $set ) {
             return [ 'success' => false, 'error' => 'set_not_found' ];
@@ -781,6 +784,16 @@ class QuestionSetService {
                 [ 'id' => absint( $candidate['id'] ), 'school_id' => $school_id ],
                 [ '%s', '%s', '%d' ],
                 [ '%d', '%d' ]
+            );
+
+            // Move questions to pending so reviewers see them as awaiting review.
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE {$questions_table} SET approval_status = 'pending'
+                     WHERE question_set_id = %d AND school_id = %d AND status = 'active'",
+                    absint( $candidate['id'] ),
+                    $school_id
+                )
             );
 
             $this->append_revision( absint( $candidate['id'] ), 'submitted', $teacher_id );
