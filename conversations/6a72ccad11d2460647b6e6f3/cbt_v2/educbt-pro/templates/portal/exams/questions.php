@@ -625,7 +625,7 @@ window.EduCBTQS = {
         let html = '<span>' + esc(m.text) + '</span>';
 
         // Withdraw button: visible when submitted or under_review
-        if (status === 'submitted' || status === 'under_review') {
+        if ((status === 'submitted' || status === 'under_review') && !API.isReviewer) {
             html += '<button type="button" id="qs-withdraw-btn" class="educbt-btn" style="background:rgba(255,255,255,.7);color:inherit;border:1px solid currentColor;font-size:.85rem;padding:6px 14px;border-radius:6px;cursor:pointer;white-space:nowrap">Withdraw</button>';
         }
         // Delete button: visible when returned (draft-like, can be deleted entirely)
@@ -1506,14 +1506,60 @@ window.EduCBTQS = {
             alert('Select at least one question to send back.');
             return;
         }
-        var note = prompt('What needs fixing? (required)');
-        if (note === null) return;
-        if (!note.trim()) {
-            alert('You must explain what needs fixing before sending back.');
-            return;
-        }
-        qsDecide(btn, 'revision', note);
+        // Show inline modal instead of browser prompt
+        showSendBackModal(btn);
     };
+
+    function showSendBackModal(triggerBtn) {
+        // Remove any existing modal
+        var existing = document.getElementById('qs-sendback-modal');
+        if (existing) existing.remove();
+
+        var modal = document.createElement('div');
+        modal.id = 'qs-sendback-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center';
+        modal.innerHTML = ''
+            + '<div style="background:var(--edu-surface,#fff);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);max-width:480px;width:90%;padding:24px">'
+            + '<h3 style="margin:0 0 8px;font-size:1.1rem">Send Back for Revision</h3>'
+            + '<p class="educbt-muted" style="margin:0 0 12px;font-size:.85rem">The teacher will be able to edit and resubmit. Explain what needs fixing — this is required.</p>'
+            + '<textarea id="qs-sendback-note" class="educbt-input" style="width:100%;min-height:80px;font-size:.9rem" placeholder="e.g. Question 3 has no correct answer marked, Question 5 stem is incomplete..."></textarea>'
+            + '<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">'
+            + '<button type="button" id="qs-sendback-cancel" class="educbt-btn">Cancel</button>'
+            + '<button type="button" id="qs-sendback-confirm" class="educbt-btn" style="background:#dc2626;color:#fff;border-color:#dc2626">Send Back</button>'
+            + '</div></div>';
+
+        document.body.appendChild(modal);
+        var textarea = document.getElementById('qs-sendback-note');
+        textarea.focus();
+
+        document.getElementById('qs-sendback-cancel').addEventListener('click', function() {
+            modal.remove();
+        });
+
+        document.getElementById('qs-sendback-confirm').addEventListener('click', function() {
+            var note = textarea.value || '';
+            if (!note.trim()) {
+                textarea.style.borderColor = '#dc2626';
+                textarea.focus();
+                alert('You must explain what needs fixing before sending back.');
+                return;
+            }
+            modal.remove();
+            qsDecide(triggerBtn, 'revision', note);
+        });
+
+        // Close on backdrop click
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) modal.remove();
+        });
+
+        // Submit on Ctrl+Enter
+        textarea.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                document.getElementById('qs-sendback-confirm').click();
+            }
+        });
+    }
 
     function qsDecide(btn, decision, note) {
         var list = el('qs-question-list');

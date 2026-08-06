@@ -181,7 +181,7 @@ class QuestionApprovalService {
      * @param int $level_id
      * @return array<int,array<string,mixed>>
      */
-    public function review_queue( int $school_id, int $subject_id, int $staff_id, int $level_id = 0 ): array {
+    public function review_queue( int $school_id, int $subject_id, int $staff_id, int $level_id = 0, string $set_ids_csv = '' ): array {
         global $wpdb;
 
         $questions = $wpdb->prefix . 'educbt_questions';
@@ -189,8 +189,18 @@ class QuestionApprovalService {
         $sets      = Schema::table( 'question_sets' );
         $levels    = Schema::table( 'class_levels' );
 
-        $where  = "q.school_id = %d AND q.subject_id = %d AND q.created_by_staff = %d AND q.status = 'active'";
-        $params = [ $school_id, $subject_id, $staff_id ];
+        // Match by created_by_staff OR question_set_id — older questions may not have
+        // created_by_staff set, so the set_ids fallback catches them.
+        $set_ids = array_filter( array_map( 'absint', explode( ',', $set_ids_csv ) ) );
+
+        if ( ! empty( $set_ids ) ) {
+            $set_placeholders = implode( ',', array_fill( 0, count( $set_ids ), '%d' ) );
+            $where  = "q.school_id = %d AND q.subject_id = %d AND q.status = 'active' AND (q.created_by_staff = %d OR q.question_set_id IN ({$set_placeholders}))";
+            $params = array_merge( [ $school_id, $subject_id, $staff_id ], $set_ids );
+        } else {
+            $where  = "q.school_id = %d AND q.subject_id = %d AND q.created_by_staff = %d AND q.status = 'active'";
+            $params = [ $school_id, $subject_id, $staff_id ];
+        }
 
         if ( $level_id > 0 ) {
             $level_name = (string) $wpdb->get_var(
@@ -245,7 +255,7 @@ class QuestionApprovalService {
      * @param array<int,int> $question_ids empty means the whole submission
      * @return array{success:bool,changed:int}
      */
-    public function decide( int $school_id, int $subject_id, int $staff_id, string $decision, string $note, int $reviewer_id, array $question_ids = [] ): array {
+    public function decide( int $school_id, int $subject_id, int $staff_id, string $decision, string $note, int $reviewer_id, array $question_ids = [], string $set_ids_csv = '' ): array {
         global $wpdb;
 
         if ( ! in_array( $decision, [ self::APPROVED, self::REVISION, self::PENDING ], true ) ) {
@@ -259,9 +269,19 @@ class QuestionApprovalService {
 
         $questions = $wpdb->prefix . 'educbt_questions';
 
-        $sql    = "UPDATE {$questions} SET approval_status = %s, review_note = %s, reviewed_by = %d, reviewed_at = %s
-                   WHERE school_id = %d AND subject_id = %d AND created_by_staff = %d AND status = 'active'";
-        $params = [ $decision, sanitize_textarea_field( $note ), $reviewer_id, current_time( 'mysql', true ), $school_id, $subject_id, $staff_id ];
+        $decide_set_ids = array_filter( array_map( 'absint', explode( ',', $set_ids_csv ) ) );
+
+        if ( ! empty( $decide_set_ids ) ) {
+            $set_placeholders = implode( ',', array_fill( 0, count( $decide_set_ids ), '%d' ) );
+            $sql    = "UPDATE {$questions} SET approval_status = %s, review_note = %s, reviewed_by = %d, reviewed_at = %s
+                       WHERE school_id = %d AND subject_id = %d AND status = 'active'
+                       AND (created_by_staff = %d OR question_set_id IN ({$set_placeholders}))";
+            $params = array_merge( [ $decision, sanitize_textarea_field( $note ), $reviewer_id, current_time( 'mysql', true ), $school_id, $subject_id, $staff_id ], $decide_set_ids );
+        } else {
+            $sql    = "UPDATE {$questions} SET approval_status = %s, review_note = %s, reviewed_by = %d, reviewed_at = %s
+                       WHERE school_id = %d AND subject_id = %d AND created_by_staff = %d AND status = 'active'";
+            $params = [ $decision, sanitize_textarea_field( $note ), $reviewer_id, current_time( 'mysql', true ), $school_id, $subject_id, $staff_id ];
+        }
 
         if ( ! empty( $question_ids ) ) {
             $ids          = array_map( 'absint', $question_ids );
@@ -278,16 +298,20 @@ class QuestionApprovalService {
         // sent back. Move the set itself, and timestamp it.
         $sets_table = Schema::table( 'question_sets' );
 
-        $set_ids = (array) $wpdb->get_col(
-            $wpdb->prepare(
-                "SELECT DISTINCT question_set_id FROM {$questions}
-                 WHERE school_id = %d AND subject_id = %d AND created_by_staff = %d
-                   AND question_set_id IS NOT NULL AND question_set_id > 0",
-                $school_id,
-                $subject_id,
-                $staff_id
-            )
-        );
+        if ( ! empty( $decide_set_ids ) ) {
+            $set_ids = $decide_set_ids;
+        } else {
+            $set_ids = (array) $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT DISTINCT question_set_id FROM {$questions}
+                     WHERE school_id = %d AND subject_id = %d AND created_by_staff = %d
+                       AND question_set_id IS NOT NULL AND question_set_id > 0",
+                    $school_id,
+                    $subject_id,
+                    $staff_id
+                )
+            );
+        }
 
         $new_status = $decision === self::APPROVED ? 'approved' : ( $decision === self::REVISION ? 'returned' : 'under_review' );
         $now        = current_time( 'mysql' );

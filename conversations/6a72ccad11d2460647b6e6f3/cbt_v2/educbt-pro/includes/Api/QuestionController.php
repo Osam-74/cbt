@@ -718,13 +718,14 @@ class QuestionController {
         $subject_id = absint( $request->get_param( 'subject_id' ) );
         $staff_id   = absint( $request->get_param( 'staff_id' ) );
         $level_id   = absint( $request->get_param( 'level_id' ) );
+        $set_ids    = sanitize_text_field( (string) $request->get_param( 'set_ids' ) );
 
-        if ( $school_id <= 0 || $subject_id <= 0 || $staff_id <= 0 ) {
-            return new \WP_Error( 'educbt_missing_params', 'Subject, staff and school are required.', [ 'status' => 400 ] );
+        if ( $school_id <= 0 || $subject_id <= 0 ) {
+            return new \WP_Error( 'educbt_missing_params', 'Subject and school are required.', [ 'status' => 400 ] );
         }
 
         $service = new QuestionApprovalService();
-        $rows    = $service->review_queue( $school_id, $subject_id, $staff_id, $level_id );
+        $rows    = $service->review_queue( $school_id, $subject_id, $staff_id, $level_id, $set_ids );
 
         return [ 'success' => true, 'questions' => $rows ];
     }
@@ -743,6 +744,7 @@ class QuestionController {
         $decision     = sanitize_key( (string) $request->get_param( 'decision' ) );
         $note         = (string) $request->get_param( 'note' );
         $question_ids = array_map( 'absint', (array) $request->get_param( 'question_ids' ) );
+        $set_ids      = sanitize_text_field( (string) $request->get_param( 'set_ids' ) );
 
         if ( ! in_array( $decision, [ 'approve', 'revision', 'pending' ], true ) ) {
             return new \WP_Error( 'educbt_invalid_decision', 'Decision must be approve or revision.', [ 'status' => 400 ] );
@@ -759,7 +761,8 @@ class QuestionController {
             $decision_const,
             $note,
             (int) $actor['id'],
-            $question_ids
+            $question_ids,
+            $set_ids
         );
 
         if ( empty( $result['success'] ) ) {

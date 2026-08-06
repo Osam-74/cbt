@@ -54,7 +54,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
         <?php if ( empty( $submissions ) ) : ?>
             <p class="educbt-muted">No questions have been submitted yet.</p>
         <?php else : ?>
-            <table class="educbt-table">
+            <table class="educbt-table" id="submissions-table">
                 <thead>
                     <tr>
                         <th>Teacher</th>
@@ -110,6 +110,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
                     $thy_status = $format_type_status( 'Theory', (string) ( $sub['theory_status'] ?? '' ), (int) ( $sub['theory'] ?? 0 ) );
 
                     $row_key = 'sub-' . (int) ( $sub['subject_id'] ?? 0 ) . '-' . (int) ( $sub['staff_id'] ?? 0 ) . '-' . (int) ( $sub['level_id'] ?? 0 );
+                    $set_ids_csv = implode( ',', array_map( 'absint', (array) ( $sub['set_ids'] ?? [] ) ) );
                     ?>
                     <tr id="row-<?php echo esc_attr( $row_key ); ?>">
                         <td><?php echo esc_html( (string) ( $sub['teacher_name'] ?? '' ) ); ?></td>
@@ -140,6 +141,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
                                 data-subject="<?php echo (int) ( $sub['subject_id'] ?? 0 ); ?>"
                                 data-staff="<?php echo (int) ( $sub['staff_id'] ?? 0 ); ?>"
                                 data-level="<?php echo (int) ( $sub['level_id'] ?? 0 ); ?>"
+                                data-sets="<?php echo esc_attr( $set_ids_csv ); ?>"
                                 data-target="review-<?php echo esc_attr( $row_key ); ?>"
                                 onclick="toggleReview(this)">Review</button>
 
@@ -163,51 +165,62 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
                             </form>
                         </td>
                     </tr>
-                    <tr id="review-<?php echo esc_attr( $row_key ); ?>" style="display:none">
-                        <td colspan="8" style="padding:0;border-top:none">
-                            <div class="educbt-review-inline" style="padding:12px;background:var(--edu-surface-alt,#f9fafb);border-top:2px solid var(--edu-line)">
-                                <div class="review-loading" style="text-align:center;padding:20px;color:var(--edu-muted)">Loading questions…</div>
-                            </div>
-                        </td>
-                    </tr>
                 <?php endforeach; ?>
                 </tbody>
             </table>
         <?php endif; ?>
     </section>
 
+    <!-- Review panel — renders BELOW the table, not inside it -->
+    <section class="educbt-card" id="review-panel" style="display:none">
+        <div id="review-panel-content">
+            <div class="review-loading" style="text-align:center;padding:20px;color:var(--edu-muted)">Loading questions…</div>
+        </div>
+    </section>
+
     <script>
     (function() {
         var nonce = '<?php echo esc_js( wp_create_nonce( 'wp_rest' ) ); ?>';
         var loaded = {};
+        var activeBtn = null;
 
         window.toggleReview = function(btn) {
             var targetId = btn.getAttribute('data-target');
-            var targetRow = document.getElementById(targetId);
-            if (!targetRow) return;
+            var panel = document.getElementById('review-panel');
+            var panelContent = document.getElementById('review-panel-content');
 
-            if (targetRow.style.display === 'none') {
-                targetRow.style.display = 'table-row';
-                btn.textContent = 'Hide';
-                if (!loaded[targetId]) {
-                    loadReviewQuestions(btn, targetRow);
-                }
-            } else {
-                targetRow.style.display = 'none';
+            // If clicking the same button that's already open, close it.
+            if (activeBtn === btn && panel.style.display !== 'none') {
+                panel.style.display = 'none';
                 btn.textContent = 'Review';
+                activeBtn = null;
+                return;
+            }
+
+            // Show the panel below the table.
+            activeBtn = btn;
+            panel.style.display = 'block';
+            btn.textContent = 'Hide';
+
+            // Scroll the panel into view.
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            if (!loaded[targetId]) {
+                loadReviewQuestions(btn, panelContent);
             }
         };
 
-        function loadReviewQuestions(btn, targetRow) {
+        function loadReviewQuestions(btn, container) {
             var subjectId = btn.getAttribute('data-subject');
             var staffId   = btn.getAttribute('data-staff');
             var levelId   = btn.getAttribute('data-level');
-            var container = targetRow.querySelector('.educbt-review-inline');
+            var setIds    = btn.getAttribute('data-sets');
 
             var url = '<?php echo esc_url_raw( rest_url( "educbt/v1/review-queue" ) ); ?>'
                 + '?subject_id=' + encodeURIComponent(subjectId)
                 + '&staff_id=' + encodeURIComponent(staffId)
-                + '&level_id=' + encodeURIComponent(levelId);
+                + '&level_id=' + encodeURIComponent(levelId)
+                + '&set_ids=' + encodeURIComponent(setIds);
 
             fetch(url, {
                 headers: { 'X-WP-Nonce': nonce }
@@ -215,7 +228,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 loaded[btn.getAttribute('data-target')] = true;
-                renderReviewQuestions(container, data.questions || [], subjectId, staffId);
+                renderReviewQuestions(container, data.questions || [], subjectId, staffId, setIds);
             })
             .catch(function() {
                 container.innerHTML = '<p style="color:red">Could not load questions. Please try again.</p>';
@@ -228,7 +241,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
             return d.innerHTML;
         }
 
-        function renderReviewQuestions(container, questions, subjectId, staffId) {
+        function renderReviewQuestions(container, questions, subjectId, staffId, setIds) {
             if (!questions.length) {
                 container.innerHTML = '<p class="educbt-muted">No questions found for this submission.</p>';
                 return;
@@ -251,7 +264,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
                 html += '<div style="display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--edu-line);align-items:flex-start">';
                 html += '<input type="checkbox" class="review-q-check" value="' + q.id + '" style="margin-top:4px">';
                 html += '<div style="flex:1">';
-                html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
+                html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">';
                 html += '<span style="font-weight:700;color:var(--edu-muted)">' + (i + 1) + '.</span>';
                 html += '<span class="educbt-pill educbt-pill--draft" style="font-size:.7rem">' + esc(q.question_type) + '</span>';
                 html += '<span class="educbt-pill ' + statusClass + '" style="font-size:.7rem">' + statusText + '</span>';
@@ -285,6 +298,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
             html += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:flex-end">';
             html += '<input type="hidden" class="decide-subject" value="' + subjectId + '">';
             html += '<input type="hidden" class="decide-staff" value="' + staffId + '">';
+            html += '<input type="hidden" class="decide-sets" value="' + setIds + '">';
             html += '<div style="flex:1;min-width:200px"><label class="educbt-muted" style="font-size:.8rem">Reviewer note (required for send back)</label>';
             html += '<textarea class="educbt-input decide-note" style="width:100%;min-height:40px;font-size:.85rem" placeholder="Explain what needs fixing..."></textarea></div>';
             html += '<button type="button" class="educbt-btn educbt-btn--primary" style="background:#16a34a" onclick="decideReview(this,\'approve\')">Approve Selected</button>';
@@ -296,7 +310,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
         }
 
         window.selectAllReview = function(btn) {
-            var container = btn.closest('.educbt-review-inline');
+            var container = document.getElementById('review-panel-content');
             var checks = container.querySelectorAll('.review-q-check');
             var allChecked = Array.prototype.every.call(checks, function(c) { return c.checked; });
             Array.prototype.forEach.call(checks, function(c) { c.checked = !allChecked; });
@@ -304,7 +318,7 @@ $educbt_body = static function () use ( $flash, $submissions, $quotas ): void {
         };
 
         window.decideReview = function(btn, action) {
-            var container = btn.closest('.educbt-review-inline');
+            var container = document.getElementById('review-panel-content');
             var subjectId = container.querySelector('.decide-subject').value;
             var staffId   = container.querySelector('.decide-staff').value;
             var note      = container.querySelector('.decide-note').value || '';
