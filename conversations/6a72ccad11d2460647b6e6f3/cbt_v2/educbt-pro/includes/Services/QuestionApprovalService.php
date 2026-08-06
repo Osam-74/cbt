@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  *     marking has already failed a class. Discovered at approval, it costs nothing.
  *
  * Approval is per QUESTION but reviewed per SUBMISSION — one teacher's questions for
- * one subject — because that is the unit a reviewer actually works through.
+ * one subject + level — because that is the unit a reviewer actually works through.
  */
 class QuestionApprovalService {
 
@@ -55,52 +55,61 @@ class QuestionApprovalService {
     }
 
     /**
-     * Every teacher's submission, per subject, with progress against the quota.
+     * Every teacher's submission, per subject and class level, with progress against the quota.
      *
      * This is the reviewer's whole screen: who has submitted what, who is short, and
-     * what is waiting to be looked at.
+     * what is waiting to be looked at. Grouped by (subject_id, level_id, teacher_id).
      *
+     * @param int $school_id
+     * @param int $staff_id
      * @return array<int,array<string,mixed>>
      */
     public function submissions( int $school_id, int $staff_id = 0 ): array {
         global $wpdb;
 
         $questions = $wpdb->prefix . 'educbt_questions';
+        $sets      = Schema::table( 'question_sets' );
         $subjects  = Schema::table( 'subjects_v2' );
         $staff     = Schema::table( 'staff' );
-        $assign    = Schema::table( 'staff_assignments' );
+        $levels    = Schema::table( 'class_levels' );
+        $depts     = Schema::table( 'departments' );
 
-        $where  = 'q.school_id = %d AND q.status = %s';
-        $params = [ $school_id, 'active' ];
+        $where  = 'qs.school_id = %d AND (qs.status IS NULL OR qs.status <> %s)';
+        $params = [ $school_id, 'draft' ];
 
         if ( $staff_id > 0 ) {
-            $where   .= ' AND q.created_by_staff = %d';
+            $where   .= ' AND qs.teacher_id = %d';
             $params[] = $staff_id;
         }
 
-        // The subject and staff joins are LEFT, deliberately.
-        //
-        // An INNER JOIN on subjects hid every question whose subject row had been
-        // renamed away or whose subject_id predates the column, so a bank with real
-        // work in it reported that nothing had been submitted — and the reviewer had
-        // no way to discover the questions existed at all.
         $rows = (array) $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT q.subject_id, q.created_by_staff,
+                "SELECT qs.subject_id,
+                        qs.level_id,
+                        qs.teacher_id,
+                        qs.department_id,
                         s.name AS subject_name,
                         CONCAT(st.first_name, ' ', st.last_name) AS teacher_name,
-                        SUM(CASE WHEN q.question_type <> 'theory' THEN 1 ELSE 0 END) AS objective_total,
-                        SUM(CASE WHEN q.question_type = 'theory' THEN 1 ELSE 0 END) AS theory_total,
-                        SUM(CASE WHEN q.approval_status = 'approved' THEN 1 ELSE 0 END) AS approved,
-                        SUM(CASE WHEN q.approval_status = 'revision' THEN 1 ELSE 0 END) AS revision,
-                        SUM(CASE WHEN q.approval_status = 'pending' OR q.approval_status IS NULL THEN 1 ELSE 0 END) AS pending,
-                        MAX(q.created_at) AS last_submitted
-                 FROM {$questions} q
-                 LEFT JOIN {$subjects} s ON s.id = q.subject_id
-                 LEFT JOIN {$staff} st ON st.id = q.created_by_staff
+                        l.name AS level_name,
+                        d.name AS department_name,
+                        GROUP_CONCAT(DISTINCT qs.id ORDER BY qs.id ASC) AS set_ids_csv,
+                        MAX(qs.submitted_at) AS submitted_at,
+                        MAX(CASE WHEN qs.exam_type = 'objective' THEN qs.status ELSE NULL END) AS objective_status,
+                        MAX(CASE WHEN qs.exam_type = 'theory' THEN qs.status ELSE NULL END) AS theory_status,
+                        SUM(CASE WHEN q.id IS NOT NULL AND q.question_type <> 'theory' THEN 1 ELSE 0 END) AS objective_total,
+                        SUM(CASE WHEN q.id IS NOT NULL AND q.question_type = 'theory' THEN 1 ELSE 0 END) AS theory_total,
+                        SUM(CASE WHEN q.id IS NOT NULL AND q.approval_status = 'approved' THEN 1 ELSE 0 END) AS approved,
+                        SUM(CASE WHEN q.id IS NOT NULL AND q.approval_status = 'revision' THEN 1 ELSE 0 END) AS revision,
+                        SUM(CASE WHEN q.id IS NOT NULL AND (q.approval_status = 'pending' OR q.approval_status IS NULL) THEN 1 ELSE 0 END) AS pending
+                 FROM {$sets} qs
+                 LEFT JOIN {$subjects} s ON s.id = qs.subject_id
+                 LEFT JOIN {$staff} st ON st.id = qs.teacher_id
+                 LEFT JOIN {$levels} l ON l.id = qs.level_id
+                 LEFT JOIN {$depts} d ON d.id = qs.department_id
+                 LEFT JOIN {$questions} q ON q.question_set_id = qs.id AND q.status = 'active'
                  WHERE {$where}
-                 GROUP BY q.subject_id, q.created_by_staff
-                 ORDER BY st.last_name ASC, s.name ASC",
+                 GROUP BY qs.subject_id, qs.level_id, qs.teacher_id
+                 ORDER BY st.last_name ASC, st.first_name ASC, s.name ASC, l.level_order ASC, qs.level_id ASC",
                 $params
             ),
             ARRAY_A
@@ -116,23 +125,47 @@ class QuestionApprovalService {
             $short_objective = max( 0, $quotas['objective'] - $objective );
             $short_theory    = max( 0, $quotas['theory'] - $theory );
 
+            $raw_ids = explode( ',', (string) ( $row['set_ids_csv'] ?? '' ) );
+            $set_ids = array_values( array_unique( array_filter( array_map( 'absint', $raw_ids ) ) ) );
+
+            $level_name = trim( (string) ( $row['level_name'] ?? '' ) );
+            $dept_name  = trim( (string) ( $row['department_name'] ?? '' ) );
+            $display_level = ( $level_name !== '' && $dept_name !== '' )
+                ? $level_name . ' ' . $dept_name
+                : $level_name;
+
+            $submitted_at = (string) ( $row['submitted_at'] ?? '' );
+
             $out[] = [
-                'subject_id'      => absint( $row['subject_id'] ),
-                // Named honestly when the link is broken, rather than blank.
-                'subject_name'    => trim( (string) $row['subject_name'] ) !== ''
+                'subject_id'       => absint( $row['subject_id'] ),
+                'subject_name'     => trim( (string) ( $row['subject_name'] ?? '' ) ) !== ''
                     ? (string) $row['subject_name']
                     : 'Unassigned subject',
-                'staff_id'        => absint( $row['created_by_staff'] ),
-                'teacher_name'    => trim( (string) $row['teacher_name'] ) ?: 'Not attributed',
-                'objective'       => $objective,
-                'theory'          => $theory,
-                'approved'        => absint( $row['approved'] ),
-                'pending'         => absint( $row['pending'] ),
-                'revision'        => absint( $row['revision'] ),
-                'short_objective' => $short_objective,
-                'short_theory'    => $short_theory,
-                'complete'        => $short_objective === 0 && $short_theory === 0,
-                'last_submitted'  => (string) $row['last_submitted'],
+                'staff_id'         => absint( $row['teacher_id'] ),
+                'created_by_staff' => absint( $row['teacher_id'] ),
+                'teacher_name'     => trim( (string) ( $row['teacher_name'] ?? '' ) ) ?: 'Not attributed',
+                'level_id'         => absint( $row['level_id'] ),
+                'level_name'       => $display_level,
+                'department_id'    => absint( $row['department_id'] ),
+                'objective'        => $objective,
+                'objective_count'  => $objective,
+                'objective_status' => (string) ( $row['objective_status'] ?? '' ),
+                'theory'           => $theory,
+                'theory_count'     => $theory,
+                'theory_status'    => (string) ( $row['theory_status'] ?? '' ),
+                'approved'         => absint( $row['approved'] ),
+                'pending'          => absint( $row['pending'] ),
+                'revision'         => absint( $row['revision'] ),
+                'short_objective'  => $short_objective,
+                'short_theory'     => $short_theory,
+                'complete'         => $short_objective === 0 && $short_theory === 0,
+                'submitted_at'     => $submitted_at,
+                'last_submitted'   => $submitted_at,
+                'set_ids'          => $set_ids,
+                'question_set_ids' => $set_ids,
+                'question_set_id'  => ! empty( $set_ids ) ? $set_ids[0] : 0,
+                'sent_back'        => absint( $row['revision'] ) > 0,
+                'all_approved'     => absint( $row['approved'] ) > 0 && absint( $row['pending'] ) === 0 && absint( $row['revision'] ) === 0,
             ];
         }
 
@@ -142,23 +175,47 @@ class QuestionApprovalService {
     /**
      * The questions in one submission, for review.
      *
+     * @param int $school_id
+     * @param int $subject_id
+     * @param int $staff_id
+     * @param int $level_id
      * @return array<int,array<string,mixed>>
      */
-    public function review_queue( int $school_id, int $subject_id, int $staff_id ): array {
+    public function review_queue( int $school_id, int $subject_id, int $staff_id, int $level_id = 0 ): array {
         global $wpdb;
 
         $questions = $wpdb->prefix . 'educbt_questions';
         $options   = Schema::table( 'question_options' );
+        $sets      = Schema::table( 'question_sets' );
+        $levels    = Schema::table( 'class_levels' );
+
+        $where  = "q.school_id = %d AND q.subject_id = %d AND q.created_by_staff = %d AND q.status = 'active'";
+        $params = [ $school_id, $subject_id, $staff_id ];
+
+        if ( $level_id > 0 ) {
+            $level_name = (string) $wpdb->get_var(
+                $wpdb->prepare( "SELECT name FROM {$levels} WHERE id = %d AND school_id = %d", $level_id, $school_id )
+            );
+
+            if ( $level_name !== '' ) {
+                $where   .= " AND (q.class_level = %s OR q.question_set_id IN (SELECT id FROM {$sets} WHERE level_id = %d AND school_id = %d))";
+                $params[] = $level_name;
+                $params[] = $level_id;
+                $params[] = $school_id;
+            } else {
+                $where   .= " AND q.question_set_id IN (SELECT id FROM {$sets} WHERE level_id = %d AND school_id = %d)";
+                $params[] = $level_id;
+                $params[] = $school_id;
+            }
+        }
 
         $rows = (array) $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT id, question_text, question_type, marks, approval_status, review_note, class_level
-                 FROM {$questions}
-                 WHERE school_id = %d AND subject_id = %d AND created_by_staff = %d AND status = 'active'
-                 ORDER BY question_type ASC, id ASC",
-                $school_id,
-                $subject_id,
-                $staff_id
+                "SELECT q.id, q.question_text, q.question_type, q.marks, q.approval_status, q.review_note, q.class_level
+                 FROM {$questions} q
+                 WHERE {$where}
+                 ORDER BY q.question_type ASC, q.id ASC",
+                $params
             ),
             ARRAY_A
         );
@@ -317,13 +374,13 @@ class QuestionApprovalService {
      *
      * @return array{success:bool,message:string}
      */
-    public function remind( int $school_id, int $subject_id, int $staff_id ): array {
+    public function remind( int $school_id, int $subject_id, int $staff_id, int $level_id = 0 ): array {
         global $wpdb;
 
         $summary = null;
 
         foreach ( $this->submissions( $school_id, $staff_id ) as $row ) {
-            if ( $row['subject_id'] === $subject_id ) {
+            if ( $row['subject_id'] === $subject_id && ( $level_id === 0 || $row['level_id'] === $level_id ) ) {
                 $summary = $row;
                 break;
             }
