@@ -51,7 +51,8 @@ if ( $session_id > 0 ) {
     $students = (array) $wpdb->get_results(
         $wpdb->prepare(
             "SELECT st.id, st.admission_number, st.first_name, st.last_name, st.gender,
-                    st.passport_photo, c.display_name AS class_name
+                    st.passport_photo, st.parent_information, st.parent_phone, st.parent_email,
+                    st.address, c.display_name AS class_name
              FROM {$enrollments} e
              INNER JOIN {$wpdb->prefix}educbt_students st ON st.id = e.student_id
              LEFT JOIN {$class_table} c ON c.id = e.class_id
@@ -197,6 +198,23 @@ $educbt_body = static function () use ( $flash, $classes, $students, $session, $
                                         </select>
                                     </div>
                                 </div>
+
+                                <div class="educbt-grid" style="margin-top:12px">
+                                    <div>
+                                        <label>Parent / Guardian name</label>
+                                        <input name="parent_information" type="text" value="<?php echo esc_attr( (string) ( $student['parent_information'] ?? '' ) ); ?>">
+                                    </div>
+                                    <div>
+                                        <label>Parent phone</label>
+                                        <input name="parent_phone" type="text" value="<?php echo esc_attr( (string) ( $student['parent_phone'] ?? '' ) ); ?>">
+                                    </div>
+                                    <div>
+                                        <label>Parent email</label>
+                                        <input name="parent_email" type="email" value="<?php echo esc_attr( (string) ( $student['parent_email'] ?? '' ) ); ?>">
+                                    </div>
+                                </div>
+                                <label style="margin-top:8px">Address</label>
+                                <textarea name="address" rows="2"><?php echo esc_textarea( (string) ( $student['address'] ?? '' ) ); ?></textarea>
 
                                 <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:12px">Save changes</button>
                             </form>

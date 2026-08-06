@@ -83,7 +83,7 @@ class PortalRouter {
                 'questions'   => [ 'capability' => Capabilities::VIEW_QUESTIONS, 'label' => 'Question Bank' ],
                 'approvals'   => [ 'capability' => Capabilities::APPROVE_QUESTIONS, 'label' => 'Approve Questions' ],
                 'invigilation' => [ 'capability' => Capabilities::ASSIGN_INVIGILATORS, 'label' => 'Invigilation Schedule' ],
-                'invigilate'  => [ 'capability' => Capabilities::INVIGILATE, 'label' => 'Live Exam Sessions' ],
+                'invigilate'  => [ 'capability' => Capabilities::INVIGILATE, 'label' => 'Live Exam Sessions', 'requires_school_wide' => true ],
                 'marking'     => [ 'capability' => Capabilities::VIEW_EXAMS, 'label' => 'Marking' ],
                 'broadsheet'  => [ 'capability' => Capabilities::VIEW_BROADSHEET, 'label' => 'Broadsheet' ],
             ],
@@ -459,6 +459,12 @@ class PortalRouter {
             // Some sections only make sense for a class teacher. Showing them to a
             // subject teacher gives a link that can only ever refuse.
             if ( ! empty( $section['requires_class_teacher'] ) && ! self::holds_a_class() ) {
+                continue;
+            }
+
+            // Some sections are school-wide only (e.g. Live Exam Sessions). Hide
+            // them from teachers who do not have school-wide scope.
+            if ( ! empty( $section['requires_school_wide'] ) && ! ( new Scope() )->is_school_wide() ) {
                 continue;
             }
 

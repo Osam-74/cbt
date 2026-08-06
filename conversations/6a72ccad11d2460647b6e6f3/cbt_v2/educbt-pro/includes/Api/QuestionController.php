@@ -491,8 +491,12 @@ class QuestionController {
             'stem_image_id' => (string) ( $request->get_param( 'stem_image_id' ) ?? '' ),
         ];
 
+        $scope      = new Scope();
+        $actor      = $scope->actor();
+        $can_approve = Gate::allows( Capabilities::APPROVE_QUESTIONS );
+
         $service = new QuestionSetService();
-        $result  = $service->add_question( $school_id, $set_id, $data );
+        $result  = $service->add_question( $school_id, $set_id, $data, (int) $actor['id'], $can_approve );
 
         if ( empty( $result['success'] ) ) {
             $code = (string) ( $result['error'] ?? '' );

@@ -2350,18 +2350,26 @@ class PortalActions {
             $this->fail( 'You do not have permission to edit this student.' );
         }
 
+        $first_name = sanitize_text_field( (string) wp_unslash( $_POST['first_name'] ?? '' ) );
+        $last_name  = sanitize_text_field( (string) wp_unslash( $_POST['last_name'] ?? '' ) );
+
         $fields = [
-            'first_name'     => sanitize_text_field( (string) wp_unslash( $_POST['first_name'] ?? '' ) ),
-            'last_name'      => sanitize_text_field( (string) wp_unslash( $_POST['last_name'] ?? '' ) ),
-            'gender'         => sanitize_key( (string) wp_unslash( $_POST['gender'] ?? '' ) ),
-            'passport_photo' => esc_url_raw( (string) wp_unslash( $_POST['passport_photo'] ?? '' ) ),
+            'first_name'          => $first_name,
+            'last_name'           => $last_name,
+            'full_name'           => trim( $first_name . ' ' . $last_name ),
+            'gender'              => sanitize_key( (string) wp_unslash( $_POST['gender'] ?? '' ) ),
+            'passport_photo'      => esc_url_raw( (string) wp_unslash( $_POST['passport_photo'] ?? '' ) ),
+            'parent_information'  => sanitize_text_field( (string) wp_unslash( $_POST['parent_information'] ?? '' ) ),
+            'parent_phone'        => sanitize_text_field( (string) wp_unslash( $_POST['parent_phone'] ?? '' ) ),
+            'parent_email'        => sanitize_email( (string) wp_unslash( $_POST['parent_email'] ?? '' ) ),
+            'address'             => sanitize_textarea_field( (string) wp_unslash( $_POST['address'] ?? '' ) ),
         ];
 
         if ( $fields['first_name'] === '' || $fields['last_name'] === '' ) {
             $this->fail( 'A student needs a first name and a surname.' );
         }
 
-        $formats = [ '%s', '%s', '%s', '%s' ];
+        $formats = [ '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ];
 
         // A school that runs its own student IDs must be able to correct one after
         // the fact. The ID is also the login username, so the WordPress account has
@@ -2439,7 +2447,7 @@ class PortalActions {
             }
         }
 
-        $this->succeed( [ 'type' => 'student_updated', 'name' => trim( $fields['first_name'] . ' ' . $fields['last_name'] ) ] );
+        $this->succeed( [ 'type' => 'student_updated', 'name' => $fields['full_name'] ] );
     }
 
     public function withdraw_student(): void {
