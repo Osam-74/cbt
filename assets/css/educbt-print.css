@@ -1,0 +1,264 @@
+/*
+ * EduCBT — printing.
+ *
+ * Printing used to reproduce the screen: navigation, buttons, cards, shadows and
+ * all. The page came out looking like a screenshot because nothing told the
+ * browser which part of it was the document.
+ *
+ * The rule here is the same one the reference implementation uses: on paper,
+ * everything is hidden except one element — the document — and that element is
+ * laid out for A4 rather than for a browser window.
+ *
+ * To make a page printable:
+ *   1. wrap the printable content in <div class="educbt-print-doc"> … </div>
+ *   2. mark controls, filters and navigation with class="no-print"
+ *   3. call window.print()
+ *
+ * Anything not inside .educbt-print-doc is dropped automatically.
+ */
+
+/* ── Screen: the document previews roughly as it will print ─────────────── */
+
+.educbt-print-doc {
+    background: #fff;
+    color: #111;
+    border-radius: 12px;
+    padding: 22px 24px;
+    border: 1px solid var(--edu-line, #e5e7eb);
+}
+
+.educbt-print-doc__header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #1a1a2e;
+    margin-bottom: 16px;
+}
+
+.educbt-print-doc__crest {
+    width: 58px;
+    height: 58px;
+    object-fit: contain;
+}
+
+.educbt-print-doc__school {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1.2;
+}
+
+.educbt-print-doc__title {
+    font-size: .95rem;
+    font-weight: 600;
+    margin: 2px 0 0;
+}
+
+.educbt-print-doc__meta {
+    font-size: .8rem;
+    color: #555;
+    margin: 2px 0 0;
+}
+
+.educbt-print-doc__footer {
+    margin-top: 18px;
+    padding-top: 10px;
+    border-top: 1px solid #cbd5e1;
+    font-size: .75rem;
+    color: #555;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.educbt-print-doc table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .85rem;
+}
+
+.educbt-print-doc th,
+.educbt-print-doc td {
+    border: 1px solid #cbd5e1;
+    padding: 5px 7px;
+    text-align: left;
+}
+
+.educbt-print-doc thead th {
+    background: #1a1a2e;
+    color: #fff;
+    font-weight: 600;
+}
+
+.educbt-print-doc tbody tr:nth-child(even) td {
+    background: #f5f5f5;
+}
+
+.educbt-print-doc .educbt-print-total td {
+    background: #e8f4e8;
+    font-weight: 700;
+    border-top: 1.5px solid #1a1a2e;
+}
+
+/* ── Paper ──────────────────────────────────────────────────────────────── */
+
+@page {
+    size: A4;
+    margin: 12mm 10mm 14mm;
+}
+
+@page landscape {
+    size: A4 landscape;
+}
+
+.educbt-print-landscape {
+    page: landscape;
+}
+
+@media print {
+
+    /*
+     * Hide the application by VISIBILITY, not by naming every wrapper.
+     *
+     * Listing class names only hides what the list happens to know about. The
+     * burger and the notification bell kept printing because the surrounding
+     * theme renders its own chrome under its own class names, which no list here
+     * could anticipate.
+     *
+     * So: make everything invisible, then make the document visible again. What
+     * survives is exactly the document and nothing else, whatever markup the
+     * theme wraps around it.
+     */
+    body * {
+        visibility: hidden !important;
+    }
+
+    .educbt-print-doc,
+    .educbt-print-doc * {
+        visibility: visible !important;
+    }
+
+    /* Lift the document out of whatever it was nested in and onto the page. */
+    .educbt-print-doc {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+    }
+
+    /* Belt and braces: chrome is also removed from layout, so it cannot leave
+       a gap at the top of page one even while invisible. */
+    .educbt-skip,
+    .educbt-nav-toggle,
+    .educbt-topbar,
+    .educbt-burger,
+    .educbt-bell,
+    .educbt-scrim,
+    .educbt-sidebar,
+    .educbt-shell__nav,
+    .educbt-tabs,
+    .educbt-flash,
+    .educbt-note,
+    nav,
+    header,
+    footer,
+    button,
+    .educbt-btn,
+    .no-print {
+        display: none !important;
+    }
+
+    /* Forms inside the document (a signature block, say) still print. */
+    .educbt-form:not(.educbt-print-doc .educbt-form) {
+        display: none !important;
+    }
+
+    html,
+    body {
+        background: #fff !important;
+        color: #000 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        font-size: 11pt;
+    }
+
+    /* Ancestors of the document must not clip, scroll or constrain it. */
+    .educbt-shell,
+    .educbt-shell__main,
+    .educbt-content,
+    .educbt-main,
+    main,
+    .educbt-card {
+        display: block !important;
+        overflow: visible !important;
+        max-width: none !important;
+        width: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+    }
+
+    /* A card that is NOT part of the document should not print at all. */
+    .educbt-card:not(.educbt-print-doc):not(:has(.educbt-print-doc)) {
+        display: none !important;
+    }
+
+    .educbt-print-doc {
+        display: block !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        background: #fff !important;
+    }
+
+    /* Keep the colours that carry meaning. Browsers drop backgrounds by default. */
+    .educbt-print-doc thead th,
+    .educbt-print-doc .educbt-print-total td,
+    .educbt-print-doc tbody tr:nth-child(even) td {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .educbt-print-doc__header {
+        border-bottom: 2px solid #000 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* Repeat column headings on every page of a long table. */
+    .educbt-print-doc thead {
+        display: table-header-group;
+    }
+
+    .educbt-print-doc tfoot {
+        display: table-footer-group;
+    }
+
+    .educbt-print-doc tr,
+    .educbt-print-doc img {
+        page-break-inside: avoid;
+    }
+
+    .educbt-print-doc h2,
+    .educbt-print-doc h3 {
+        page-break-after: avoid;
+    }
+
+    .educbt-print-section {
+        page-break-inside: avoid;
+    }
+
+    .educbt-print-break {
+        page-break-before: always;
+    }
+
+    /* A link's href is useless on paper; the text is not. */
+    .educbt-print-doc a {
+        color: #000 !important;
+        text-decoration: none !important;
+    }
+}
