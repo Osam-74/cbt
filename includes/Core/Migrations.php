@@ -19,6 +19,27 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Migrations {
 
+    /**
+     * Run every migration newer than the stored schema version.
+     *
+     * This method was missing entirely from the plugin backup this repo started
+     * from — Plugin::maybe_upgrade() / run_activation() call Migrations::run()
+     * expecting an array of applied versions back, but there was no run() here,
+     * only register(). That is a fatal "call to undefined method" — caught
+     * silently by the \Throwable catch around it and error_log()'d, so no
+     * migration EVER actually ran on an existing install; every ensure_column()
+     * added since is dead code until this exists. Restored to the obvious shape:
+     * build the registry, hand it to MigrationManager, run it.
+     *
+     * @return string[] Versions that were applied, oldest to newest.
+     */
+    public static function run(): array {
+        $manager = new MigrationManager();
+        self::register( $manager );
+
+        return $manager->run();
+    }
+
     public static function register( MigrationManager $manager ): void {
 
         // 1.0.0 — the v1 tables, as they shipped. Retained so an existing install
@@ -550,5 +571,20 @@ class Migrations {
             $wpdb->query( "ALTER TABLE {$invig} DROP INDEX paper_staff" );
             $wpdb->query( "ALTER TABLE {$invig} ADD UNIQUE KEY paper_unique (paper_id)" );
         } );
+
+        // 12.5.0 — exam_series.assessment_mode was added to TenantContext::create_tables()
+        // (for CBT/Written/Mixed series-level governance), but create_tables() is only
+        // reached automatically via the 1.0.0 migration on a fresh install — an existing
+        // site had already completed 1.0.0 long ago, so the new ensure_column() call
+        // never ran there and every governing_assessment_mode() lookup 500'd with
+        // "Unknown column 'assessment_mode'". Registering any new version here is what
+        // makes MigrationManager::has_pending() true again, which is what makes
+        // Plugin::maybe_upgrade() call create_tables() on the next request — so this
+        // re-runs the (idempotent) full create_tables() rather than only this one
+        // column, catching anything else added the same way since 12.4.0.
+        $manager->register( '12.5.0', static function (): void {
+            ( new \EduCBTPro\Core\TenantContext() )->create_tables();
+        } );
     }
 
+}
