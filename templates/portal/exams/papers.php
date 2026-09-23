@@ -345,6 +345,15 @@ $educbt_body = static function () use ( $flash, $subjects, $classes, $series, $p
                         <input id="ca_title" name="title" type="text" placeholder="Leave blank to name it after the assessment">
                     </div>
                     <div>
+                        <label for="ca_mode">Assessment mode</label>
+                        <select id="ca_mode" name="assessment_mode" onchange="educbtToggleCaWritten(this.value)">
+                            <option value="mixed" selected>Mixed &mdash; each teacher chooses CBT or Written</option>
+                            <option value="cbt">CBT &mdash; every subject is a CBT test</option>
+                            <option value="written">Written &mdash; every subject is on paper</option>
+                        </select>
+                        <small class="educbt-muted">CBT/Written locks the format for every subject; a Written choice under Mixed still needs the exam office's approval.</small>
+                    </div>
+                    <div>
                         <label for="ca_opens">Question window opens *</label>
                         <input id="ca_opens" name="starts_on" type="date" required>
                         <small class="educbt-muted">Date teachers can begin submitting questions.</small>
@@ -354,19 +363,40 @@ $educbt_body = static function () use ( $flash, $subjects, $classes, $series, $p
                         <input id="ca_closes" name="ends_on" type="date" required>
                         <small class="educbt-muted">Deadline for teachers to submit questions.</small>
                     </div>
-                    <div>
+                    <div id="ca_count_wrap">
                         <label for="ca_count">Questions per student *</label>
                         <input id="ca_count" name="questions_per_student" type="number" min="1" max="100" value="20" required>
                         <small class="educbt-muted">Teachers may write more than this; each student answers this many.</small>
                     </div>
-                    <div>
+                    <div id="ca_duration_wrap">
                         <label for="ca_duration">Duration (minutes) *</label>
                         <input id="ca_duration" name="duration_minutes" type="number" min="5" max="180" step="5" value="30" required>
                     </div>
                 </div>
+                <p id="ca_written_note" class="educbt-note educbt-note--info" style="display:none;margin-top:10px">
+                    Every subject in this window is on paper &mdash; there is nothing to time or pool CBT questions for, so questions-per-student and duration are skipped.
+                </p>
 
                 <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:14px">Open assessment window</button>
             </form>
+            <script>
+            // Written mode has no CBT sitting to size or time, so those two fields
+            // become dead inputs — hidden rather than removed, so the form still
+            // posts a valid default if the office flips back to Mixed/CBT later.
+            function educbtToggleCaWritten( mode ) {
+                var isWritten = mode === 'written';
+                var countWrap = document.getElementById( 'ca_count_wrap' );
+                var durationWrap = document.getElementById( 'ca_duration_wrap' );
+                var note = document.getElementById( 'ca_written_note' );
+                var countInput = document.getElementById( 'ca_count' );
+                var durationInput = document.getElementById( 'ca_duration' );
+                if ( countWrap ) countWrap.style.display = isWritten ? 'none' : '';
+                if ( durationWrap ) durationWrap.style.display = isWritten ? 'none' : '';
+                if ( note ) note.style.display = isWritten ? '' : 'none';
+                if ( countInput ) countInput.required = ! isWritten;
+                if ( durationInput ) durationInput.required = ! isWritten;
+            }
+            </script>
         <?php endif; ?>
     </section>
 
@@ -407,6 +437,15 @@ $educbt_body = static function () use ( $flash, $subjects, $classes, $series, $p
                     <label for="series_title">Name</label>
                     <input id="series_title" name="title" type="text" placeholder="First Term Examination">
                     <small class="educbt-muted">Leave blank to name it after the term.</small>
+                </div>
+                <div>
+                    <label for="exam_mode">Assessment mode</label>
+                    <select id="exam_mode" name="assessment_mode">
+                        <option value="mixed" selected>Mixed &mdash; each teacher chooses CBT or Written</option>
+                        <option value="cbt">CBT &mdash; every subject is a CBT test</option>
+                        <option value="written">Written &mdash; every subject is on paper</option>
+                    </select>
+                    <small class="educbt-muted">CBT/Written locks the format for every subject; a Written choice under Mixed still needs the exam office's approval.</small>
                 </div>
                 <div>
                     <label for="starts_on">Question window opens</label>

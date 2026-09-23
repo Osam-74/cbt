@@ -624,6 +624,14 @@ class QuestionController {
             );
         }
 
+        // The series may have already decided the format for every subject in it
+        // — the client hides the CBT/Written toggle in that case, but the choice
+        // is enforced here too rather than trusted from the form.
+        $forced_delivery = $service->governing_assessment_mode( $school_id, $series_id );
+        if ( in_array( $forced_delivery, [ 'cbt', 'written' ], true ) ) {
+            $delivery_mode = $forced_delivery;
+        }
+
         // Try to find existing first.
         $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type, 0, $series_id, $waec_mode );
 
@@ -633,18 +641,38 @@ class QuestionController {
                 return new \WP_Error( 'educbt_create_failed', 'Could not create question set.', [ 'status' => 400 ] );
             }
             $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type, 0, $series_id, $waec_mode );
-        } elseif ( (int) ( $set['waec_mode'] ?? 0 ) !== ( $waec_mode ? 1 : 0 ) ) {
-            // An EXISTING set had its WAEC flag ignored, so unticking the box saved
-            // nothing: the next reload read the old value back and the checkbox
-            // reappeared ticked. Switching a set between WAEC and ordinary structure
-            // is a normal thing to do while setting a paper, so it is persisted.
-            //
-            // Only the flag changes. Questions already written stay where they are —
-            // discarding them because a teacher toggled a checkbox would be a far
-            // worse outcome than a set whose sections need reassigning.
-            $service->set_waec_mode( $school_id, absint( $set['id'] ), $waec_mode );
+        } else {
+            $needs_reload = false;
 
-            $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type, 0, $series_id, $waec_mode );
+            if ( (int) ( $set['waec_mode'] ?? 0 ) !== ( $waec_mode ? 1 : 0 ) ) {
+                // An EXISTING set had its WAEC flag ignored, so unticking the box saved
+                // nothing: the next reload read the old value back and the checkbox
+                // reappeared ticked. Switching a set between WAEC and ordinary structure
+                // is a normal thing to do while setting a paper, so it is persisted.
+                //
+                // Only the flag changes. Questions already written stay where they are —
+                // discarding them because a teacher toggled a checkbox would be a far
+                // worse outcome than a set whose sections need reassigning.
+                $service->set_waec_mode( $school_id, absint( $set['id'] ), $waec_mode );
+                $needs_reload = true;
+            }
+
+            // Delivery mode is adjustable right up until the set is handed in —
+            // after that it describes work already submitted, so an approved or
+            // submitted set is left alone rather than silently rewritten. This is
+            // what makes the forced governance above actually stick for a set
+            // that was created before the series decided the format.
+            if (
+                $service->is_editable_status( (string) ( $set['status'] ?? '' ) )
+                && $delivery_mode !== (string) ( $set['delivery_mode'] ?? 'cbt' )
+            ) {
+                $service->set_delivery_mode( $school_id, absint( $set['id'] ), $delivery_mode );
+                $needs_reload = true;
+            }
+
+            if ( $needs_reload ) {
+                $set = $service->find_set( $school_id, $session_id, $term_id, $subject_id, $level_id, $department_id, $exam_type, 0, $series_id, $waec_mode );
+            }
         }
 
         $questions = $set ? $service->get_questions( absint( $set['id'] ) ) : [];

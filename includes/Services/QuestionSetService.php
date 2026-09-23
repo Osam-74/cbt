@@ -813,43 +813,30 @@ class QuestionSetService {
             return [ 'success' => false, 'error' => 'not_assigned' ];
         }
 
+        // The series this set belongs to may have already decided the format for
+        // every subject in it ('cbt' or 'written'), or left it to each teacher
+        // ('mixed', the default — and how every series created before this
+        // governance existed still reads).
+        $delivery_mode = (string) ( $set['delivery_mode'] ?? 'cbt' );
+        $mode = $this->governing_assessment_mode( $school_id, absint( $set['series_id'] ?? 0 ) );
+
+        if ( $mode === 'cbt' && $delivery_mode === 'written' ) {
+            return [ 'success' => false, 'error' => 'cbt_only' ];
+        }
+
+        if ( $mode === 'written' && $delivery_mode !== 'written' ) {
+            return [ 'success' => false, 'error' => 'written_only' ];
+        }
+
         // Written examinations have no questions in the bank — they are paper-based.
         // Submitting the intent is enough: no minimum-question check, no sibling
         // requirement, no objective/theory pairing. The exam office just needs to
         // know this subject will be examined on paper.
-        $delivery_mode = (string) ( $set['delivery_mode'] ?? 'cbt' );
         if ( $delivery_mode === 'written' ) {
             $set_id_int = absint( $set['id'] );
             $table      = Schema::table( 'question_sets' );
 
-            // There is nothing to review. A written paper carries no questions in
-            // the bank, so a reviewer opening it would see an empty list and could
-            // only ever click approve. Holding it at 'submitted' meant a subject
-            // silently missed the timetable while everyone assumed it had been
-            // handled, so it is approved on submission.
-            //
-            // The exam office is still told, because the INTENT matters: they need
-            // to know this subject will be sat on paper so it gets a slot, an
-            // invigilator and a room.
-            $wpdb->update(
-                $table,
-                [
-                    'status'       => 'approved',
-                    'submitted_at' => current_time( 'mysql' ),
-                    'submitted_by' => $teacher_id,
-                    'reviewed_at'  => current_time( 'mysql' ),
-                    'reviewed_by'  => $teacher_id,
-                    'reviewer_comment' => 'Written paper — approved automatically on submission. No questions are held in the bank for paper-based examinations.',
-                ],
-                [ 'id' => $set_id_int, 'school_id' => $school_id ],
-                [ '%s', '%s', '%d', '%s', '%d', '%s' ],
-                [ '%d', '%d' ]
-            );
-
-            $this->append_revision( $set_id_int, 'approved', $teacher_id );
-
-            // Names for the notice. Resolved here because the shared lookups below
-            // sit after the objective/theory path and are never reached from here.
+            // Names for the notice, needed by both branches below.
             $subject_name = (string) $wpdb->get_var(
                 $wpdb->prepare( 'SELECT name FROM ' . Schema::table( 'subjects_v2' ) . ' WHERE id = %d', $set['subject_id'] )
             );
@@ -863,10 +850,82 @@ class QuestionSetService {
             $notif        = new NotificationService();
             $reviewer_ids = $this->get_reviewer_user_ids( $school_id );
 
-            $title = 'Written paper registered — ' . $subject_name . ' (' . $class_name . ')';
-            $body  = $teacher_name . ' will examine ' . $subject_name . ' (' . $class_name . ') on paper rather than in the CBT engine. '
-                . 'No questions are held in the bank for it. It needs a slot on the timetable, an invigilator and a room, '
-                . 'and the marks are entered directly by the subject teacher afterwards.';
+            // Under a whole-series 'written' (or 'cbt', though that cannot reach
+            // here) mode the school has already decided the format, so this
+            // submission IS the decision and there is nothing left to review — a
+            // reviewer opening it would see an empty question list and could only
+            // ever click approve. Under 'mixed', this individual teacher is the
+            // one choosing written over CBT for their own subject, so the exam
+            // office still needs to see and approve that choice like any other
+            // submission.
+            if ( $mode !== 'mixed' ) {
+                $wpdb->update(
+                    $table,
+                    [
+                        'status'       => 'approved',
+                        'submitted_at' => current_time( 'mysql' ),
+                        'submitted_by' => $teacher_id,
+                        'reviewed_at'  => current_time( 'mysql' ),
+                        'reviewed_by'  => $teacher_id,
+                        'reviewer_comment' => 'Written paper — approved automatically on submission. No questions are held in the bank for paper-based examinations.',
+                    ],
+                    [ 'id' => $set_id_int, 'school_id' => $school_id ],
+                    [ '%s', '%s', '%d', '%s', '%d', '%s' ],
+                    [ '%d', '%d' ]
+                );
+
+                $this->append_revision( $set_id_int, 'approved', $teacher_id );
+
+                $title = 'Written paper registered — ' . $subject_name . ' (' . $class_name . ')';
+                $body  = $teacher_name . ' will examine ' . $subject_name . ' (' . $class_name . ') on paper rather than in the CBT engine. '
+                    . 'No questions are held in the bank for it. It needs a slot on the timetable, an invigilator and a room, '
+                    . 'and the marks are entered directly by the subject teacher afterwards.';
+
+                foreach ( $reviewer_ids as $rid ) {
+                    $notif->notify(
+                        $school_id,
+                        $rid,
+                        NotificationService::QUESTION_SUBMITTED,
+                        $title,
+                        $body,
+                        home_url( '/portal/exams/approvals/' )
+                    );
+                }
+
+                EventDispatcher::action( 'educbt_question_set_submitted', [
+                    'school_id'     => $school_id,
+                    'id'            => $set_id_int,
+                    'subject_id'    => absint( $set['subject_id'] ),
+                    'subject_name'  => $subject_name,
+                    'class_name'    => $class_name,
+                    'exam_type'     => (string) $set['exam_type'],
+                    'delivery_mode' => 'written',
+                    'count'         => 0,
+                    'teacher_id'    => $teacher_id,
+                ] );
+
+                return [ 'success' => true, 'set_id' => $set_id_int, 'auto_approved' => true ];
+            }
+
+            // Mixed governance: the intent itself is what gets reviewed. Nothing
+            // to count, so no minimum-question or sibling check applies.
+            $wpdb->update(
+                $table,
+                [
+                    'status'       => 'submitted',
+                    'submitted_at' => current_time( 'mysql' ),
+                    'submitted_by' => $teacher_id,
+                ],
+                [ 'id' => $set_id_int, 'school_id' => $school_id ],
+                [ '%s', '%s', '%d' ],
+                [ '%d', '%d' ]
+            );
+
+            $this->append_revision( $set_id_int, 'submitted', $teacher_id );
+
+            $title = 'Written paper submitted for review — ' . $subject_name . ' (' . $class_name . ')';
+            $body  = $teacher_name . ' has chosen to examine ' . $subject_name . ' (' . $class_name . ') on paper rather than in the CBT engine. '
+                . 'No questions are held in the bank for it, but the choice itself needs your approval before it goes on the timetable.';
 
             foreach ( $reviewer_ids as $rid ) {
                 $notif->notify(
@@ -891,7 +950,7 @@ class QuestionSetService {
                 'teacher_id'    => $teacher_id,
             ] );
 
-            return [ 'success' => true, 'set_id' => $set_id_int, 'auto_approved' => true ];
+            return [ 'success' => true, 'set_id' => $set_id_int, 'auto_approved' => false ];
         }
 
         // A terminal examination is submitted as one paper: objective AND theory go
@@ -1247,6 +1306,38 @@ class QuestionSetService {
         return $updated !== false;
     }
 
+    /**
+     * Adjustable right up until the set is handed in — after that it describes
+     * work already submitted, so callers must gate this on is_editable_status()
+     * themselves rather than silently rewriting a paper in review.
+     */
+    public function set_delivery_mode( int $school_id, int $set_id, string $delivery_mode ): bool {
+        if ( ! in_array( $delivery_mode, [ 'cbt', 'written' ], true ) ) {
+            return false;
+        }
+
+        global $wpdb;
+
+        $updated = $wpdb->update(
+            Schema::table( 'question_sets' ),
+            [ 'delivery_mode' => $delivery_mode ],
+            [ 'id' => $set_id, 'school_id' => $school_id ],
+            [ '%s' ],
+            [ '%d', '%d' ]
+        );
+
+        return $updated !== false;
+    }
+
+    /**
+     * Public wrapper for is_editable() — callers outside this class (e.g. the
+     * REST controller deciding whether a forced delivery mode may still patch
+     * an existing set) need the same rule without duplicating it.
+     */
+    public function is_editable_status( string $status ): bool {
+        return $this->is_editable( $status );
+    }
+
     public function get_set( int $school_id, int $set_id ): ?array {
         global $wpdb;
 
@@ -1332,6 +1423,38 @@ class QuestionSetService {
             : absint( $quotas['objective'] ?? 20 );
 
         return max( 1, $min );
+    }
+
+    /**
+     * The exam series that governs a set's CBT/Written choice.
+     *
+     * 'cbt' or 'written' means the office decided the format for the whole
+     * series — every subject in it is forced that way, and a Written
+     * declaration under it needs no review (see submit_set()). 'mixed' (the
+     * default, and what every series created before this existed reads as)
+     * leaves each subject-teacher free to pick, except a Written pick under
+     * Mixed still goes to the exam office for a real approval.
+     *
+     * A set with no series (series_id 0/null — should not happen through the
+     * normal open-window flow, but is not assumed) governs as 'mixed', same
+     * as a series row that has somehow gone missing.
+     */
+    public function governing_assessment_mode( int $school_id, int $series_id ): string {
+        if ( $series_id <= 0 ) {
+            return 'mixed';
+        }
+
+        global $wpdb;
+
+        $mode = $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT assessment_mode FROM ' . Schema::table( 'exam_series' ) . ' WHERE id = %d AND school_id = %d',
+                $series_id,
+                $school_id
+            )
+        );
+
+        return in_array( $mode, [ 'cbt', 'written' ], true ) ? (string) $mode : 'mixed';
     }
 
     /**

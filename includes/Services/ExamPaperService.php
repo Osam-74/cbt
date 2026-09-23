@@ -66,20 +66,30 @@ class ExamPaperService {
             return [ 'success' => false, 'error' => 'invalid_series_type' ];
         }
 
+        // 'cbt' or 'written' forces that delivery mode on every subject in this
+        // examination; 'mixed' (the default) leaves each subject-teacher's own
+        // choice as-is, except a 'written' choice under 'mixed' still goes to the
+        // exam office for approval. See QuestionSetService::governing_assessment_mode().
+        $assessment_mode = (string) ( $data['assessment_mode'] ?? 'mixed' );
+        if ( ! in_array( $assessment_mode, [ 'cbt', 'written', 'mixed' ], true ) ) {
+            $assessment_mode = 'mixed';
+        }
+
         $wpdb->insert(
             Schema::table( 'exam_series' ),
             [
-                'school_id'   => $school_id,
-                'session_id'  => $session_id,
-                'term_id'     => absint( $data['term_id'] ?? 0 ) ?: null,
-                'title'       => sanitize_text_field( $title ),
-                'series_type' => $type,
-                'starts_on'   => sanitize_text_field( (string) ( $data['starts_on'] ?? '' ) ) ?: null,
-                'ends_on'     => sanitize_text_field( (string) ( $data['ends_on'] ?? '' ) ) ?: null,
-                'status'      => 'draft',
-                'created_by'  => get_current_user_id(),
+                'school_id'       => $school_id,
+                'session_id'      => $session_id,
+                'term_id'         => absint( $data['term_id'] ?? 0 ) ?: null,
+                'title'           => sanitize_text_field( $title ),
+                'series_type'     => $type,
+                'starts_on'       => sanitize_text_field( (string) ( $data['starts_on'] ?? '' ) ) ?: null,
+                'ends_on'         => sanitize_text_field( (string) ( $data['ends_on'] ?? '' ) ) ?: null,
+                'status'          => 'draft',
+                'created_by'      => get_current_user_id(),
+                'assessment_mode' => $assessment_mode,
             ],
-            [ '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%d' ]
+            [ '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%d', '%s' ]
         );
 
         return [ 'success' => true, 'series_id' => absint( $wpdb->insert_id ) ];

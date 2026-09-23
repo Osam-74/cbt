@@ -737,6 +737,16 @@ $this->ensure_column( $students_table, 'registration_number', "ALTER TABLE {$stu
         $this->ensure_column( $series_table, 'questions_per_student', "ALTER TABLE {$series_table} ADD COLUMN questions_per_student int(11) NOT NULL DEFAULT 0" );
         $this->ensure_column( $series_table, 'duration_minutes', "ALTER TABLE {$series_table} ADD COLUMN duration_minutes int(11) NOT NULL DEFAULT 0" );
 
+        // Series-level assessment mode governance (parity with the CBT/Written
+        // toggle on the Next.js site): 'cbt' or 'written' forces that delivery
+        // mode on every subject in the series and auto-clears the intent with
+        // nothing to review; 'mixed' (the default, matching every series
+        // created before this column existed) leaves each teacher's own CBT/
+        // Written choice as-is, except a 'written' choice under 'mixed' still
+        // goes to the exam office for a real approval. See
+        // QuestionSetService::governing_assessment_mode() / submit_set().
+        $this->ensure_column( $series_table, 'assessment_mode', "ALTER TABLE {$series_table} ADD COLUMN assessment_mode varchar(10) NOT NULL DEFAULT 'mixed'" );
+
         // A question set belongs to the series it was written for. Without this a
         // CA question and a terminal examination question for the same subject and
         // term are indistinguishable, and the CA pool cannot be offered separately

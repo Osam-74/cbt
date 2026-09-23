@@ -43,4 +43,61 @@ class MediaField {
 
         return (string) ob_get_clean();
     }
+
+    /**
+     * Center-crop an already-uploaded image to a square, in place.
+     *
+     * The school crest is used both as a document watermark (any shape is fine
+     * there) AND as the browser-tab favicon, which only has a square slot. A
+     * school uploading a wide banner-style logo used to get it squished flat in
+     * every browser tab — this crops the longer side down to match the shorter
+     * one, centered, so the crest reads correctly wherever it is shown small.
+     * Uses WordPress's own image editor (GD or Imagick, whichever the host has)
+     * so no new dependency is introduced.
+     *
+     * @param string $local_path Absolute path to the file on disk (e.g. $movefile['file']).
+     * @return bool True if the file was cropped (or was already square), false on failure.
+     */
+    public static function crop_to_square( string $local_path ): bool {
+        if ( $local_path === '' || ! file_exists( $local_path ) ) {
+            return false;
+        }
+
+        if ( ! function_exists( 'wp_get_image_editor' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+        }
+
+        $size = @getimagesize( $local_path );
+        if ( false === $size ) {
+            return false;
+        }
+
+        [ $width, $height ] = $size;
+
+        if ( $width === $height ) {
+            return true; // Already square — nothing to do.
+        }
+
+        $editor = wp_get_image_editor( $local_path );
+        if ( is_wp_error( $editor ) ) {
+            return false;
+        }
+
+        $side = min( $width, $height );
+        $src_x = (int) round( ( $width - $side ) / 2 );
+        $src_y = (int) round( ( $height - $side ) / 2 );
+
+        // crop( $src_x, $src_y, $src_w, $src_h, $dst_w = null, $dst_h = null ).
+        // A cap of 512px keeps the favicon/preview light without visibly softening
+        // a typical school crest.
+        $target = min( $side, 512 );
+        $cropped = $editor->crop( $src_x, $src_y, $side, $side, $target, $target );
+        if ( is_wp_error( $cropped ) ) {
+            return false;
+        }
+
+        $saved = $editor->save( $local_path );
+
+        return ! is_wp_error( $saved );
+    }
 }

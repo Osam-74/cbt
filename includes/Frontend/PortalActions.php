@@ -688,6 +688,7 @@ class PortalActions {
                 'ends_on'               => (string) wp_unslash( $_POST['ends_on'] ?? '' ),
                 'questions_per_student' => absint( $_POST['questions_per_student'] ?? 20 ),
                 'duration_minutes'      => absint( $_POST['duration_minutes'] ?? 30 ),
+                'assessment_mode'       => (string) wp_unslash( $_POST['assessment_mode'] ?? 'mixed' ),
             ],
             absint( ( new Scope() )->actor()['id'] ?? 0 )
         );
@@ -990,6 +991,7 @@ class PortalActions {
                 'title'      => $title,
                 'starts_on'  => sanitize_text_field( (string) wp_unslash( $_POST['starts_on'] ?? '' ) ),
                 'ends_on'    => sanitize_text_field( (string) wp_unslash( $_POST['ends_on'] ?? '' ) ),
+                'assessment_mode' => (string) wp_unslash( $_POST['assessment_mode'] ?? 'mixed' ),
             ]
         );
 
@@ -2725,6 +2727,11 @@ class PortalActions {
             if ( false !== $check_image ) {
                 $movefile = wp_handle_upload( $_FILES['logo_file'], [ 'test_form' => false ] );
                 if ( $movefile && ! isset( $movefile['error'] ) ) {
+                    // The crest doubles as the browser-tab favicon, which only has a
+                    // square slot — crop it now so a wide banner-style upload never
+                    // shows squished. Cropping is best-effort: if it fails for any
+                    // reason the original upload is still used as-is.
+                    \EduCBTPro\Frontend\MediaField::crop_to_square( (string) ( $movefile['file'] ?? '' ) );
                     $logo_url = (string) $movefile['url'];
                 }
             }

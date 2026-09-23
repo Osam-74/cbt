@@ -186,6 +186,16 @@ if ( $writing_practice ) {
 }
 $ca_window   = ( $open_window && $open_window['is_ca'] ) ? $open_window : null;
 
+// The series may have already decided the format for every subject in it —
+// the toggle below hides itself in that case, but the choice is enforced on
+// the server too (QuestionController::create_or_load_set / submit_set),
+// rather than trusted from the client.
+$forced_delivery = ( new \EduCBTPro\Services\QuestionSetService() )->governing_assessment_mode(
+    $school_id,
+    absint( $open_window['series_id'] ?? 0 )
+);
+$forced_delivery = in_array( $forced_delivery, [ 'cbt', 'written' ], true ) ? $forced_delivery : null;
+
 // If the bank is closed and practice was not opted into, show the closed notice
 // with a button to opt in to practice exam question setting.
 if ( empty( $open_window ) ) {
@@ -262,7 +272,7 @@ $educbt_title = 'Question Bank';
 $educbt_body = static function () use (
     $flash, $subjects, $subject_classes, $session_label, $session_id, $term_id, $ca_window, $open_window, $writing_practice,
     $exam_prep_open, $is_reviewer, $actor, $min_objective, $min_theory,
-    $my_submissions, $passages, $school_id
+    $my_submissions, $passages, $school_id, $forced_delivery
 ): void {
     require EDUCBT_PRO_PATH . 'templates/portal/partials/flash.php';
     ?>
@@ -315,6 +325,7 @@ window.EduCBTQS = {
     writtenTheoryMarks: 40,
     writtenTotalMarks: 60,
     optInPractice: <?php echo $writing_practice ? 'true' : 'false'; ?>,
+    forcedDelivery: <?php echo wp_json_encode( $forced_delivery ); ?>,
 };
 </script>
 
@@ -421,12 +432,13 @@ window.EduCBTQS = {
             <span class="educbt-muted" style="font-size:.8rem;display:block;margin-bottom:3px">Session / Term</span>
             <span style="font-weight:600;font-size:.95rem"><?php echo $session_label ?: 'No session set'; ?></span>
         </div>
-        <div style="min-width:180px">
+        <div id="qs-delivery-mode-wrap" style="min-width:180px">
             <label class="educbt-muted" style="font-size:.8rem;display:block;margin-bottom:3px">Delivery Mode</label>
             <div id="qs-delivery-mode" style="display:flex;gap:0;border:1px solid var(--edu-line);border-radius:8px;overflow:hidden">
                 <button type="button" data-mode="cbt" class="qs-mode-btn" style="flex:1;padding:7px 12px;border:0;background:var(--edu-primary,#3b82f6);color:#fff;font-weight:600;cursor:pointer">CBT</button>
                 <button type="button" data-mode="written" class="qs-mode-btn" style="flex:1;padding:7px 12px;border:0;background:transparent;color:inherit;font-weight:500;cursor:pointer">Written</button>
             </div>
+            <span id="qs-delivery-mode-locked" class="educbt-pill educbt-pill--draft" style="display:none;font-size:.75rem"></span>
         </div>
     </div>
     <!-- Selection row — Subject, Class, Delivery Mode, Exam Type, Default Marks, Method -->
@@ -575,6 +587,12 @@ window.EduCBTQS = {
     let currentQuestions = [];
     let unsavedInput = false;
     let currentDeliveryMode = 'cbt';
+    // The series may force every subject to one format. The toggle is hidden in
+    // that case (see applyForcedDeliveryUI below) — the guard on the click
+    // handler further down is defense-in-depth, since the server enforces this
+    // regardless of what the client sends.
+    const forcedDelivery = ( API.forcedDelivery === 'cbt' || API.forcedDelivery === 'written' ) ? API.forcedDelivery : null;
+    if ( forcedDelivery ) currentDeliveryMode = forcedDelivery;
 
     // ---- Helpers ----
 
@@ -817,6 +835,21 @@ window.EduCBTQS = {
         });
     }
 
+    // The office decided the format for every subject in this series — there is
+    // no choice left to make, so the toggle is swapped for a plain label instead
+    // of sitting there ignoring clicks (the server enforces this regardless, but
+    // a live toggle that silently does nothing reads as broken).
+    function applyForcedDeliveryUI() {
+        if (!forcedDelivery) return;
+        var toggle = el('qs-delivery-mode');
+        var locked = el('qs-delivery-mode-locked');
+        if (toggle) toggle.style.display = 'none';
+        if (locked) {
+            locked.textContent = forcedDelivery === 'written' ? 'Written (fixed for this series)' : 'CBT (fixed for this series)';
+            locked.style.display = 'inline-block';
+        }
+    }
+
     function applyWrittenMode(isWritten) {
         // In written mode, hide question entry, preview, progress bar, exam type,
         // method selector, marks, and WAEC checkbox. Show the written intent panel.
@@ -861,8 +894,11 @@ window.EduCBTQS = {
         }
     }
 
+    applyForcedDeliveryUI();
+
     document.querySelectorAll('.qs-mode-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
+            if (forcedDelivery) return; // series already decided; toggle is hidden, but guard anyway.
             var mode = this.dataset.mode;
             if (mode === currentDeliveryMode) return;
 

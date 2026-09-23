@@ -112,6 +112,15 @@ class CaTestWindowService {
             return [ 'success' => false, 'error' => 'window_exists' ];
         }
 
+        // 'cbt' or 'written' forces that delivery mode on every subject's CA test
+        // in this window; 'mixed' (the default) leaves each subject-teacher's own
+        // choice as-is, except a 'written' choice under 'mixed' still goes to the
+        // exam office for approval. See QuestionSetService::governing_assessment_mode().
+        $assessment_mode = (string) ( $data['assessment_mode'] ?? 'mixed' );
+        if ( ! in_array( $assessment_mode, [ 'cbt', 'written', 'mixed' ], true ) ) {
+            $assessment_mode = 'mixed';
+        }
+
         $wpdb->insert(
             Schema::table( 'exam_series' ),
             [
@@ -127,6 +136,7 @@ class CaTestWindowService {
                 'duration_minutes'      => max( 1, absint( $data['duration_minutes'] ?? 30 ) ),
                 'status'                => 'draft',
                 'created_by'            => $actor_id ?: null,
+                'assessment_mode'       => $assessment_mode,
             ]
         );
 
