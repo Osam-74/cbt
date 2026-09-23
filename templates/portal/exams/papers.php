@@ -353,12 +353,12 @@ $educbt_body = static function () use ( $flash, $subjects, $classes, $series, $p
                         </select>
                         <small class="educbt-muted">CBT/Written locks the format for every subject; a Written choice under Mixed still needs the exam office's approval.</small>
                     </div>
-                    <div>
+                    <div id="ca_opens_wrap">
                         <label for="ca_opens">Question window opens *</label>
                         <input id="ca_opens" name="starts_on" type="date" required>
                         <small class="educbt-muted">Date teachers can begin submitting questions.</small>
                     </div>
-                    <div>
+                    <div id="ca_closes_wrap">
                         <label for="ca_closes">Question window closes *</label>
                         <input id="ca_closes" name="ends_on" type="date" required>
                         <small class="educbt-muted">Deadline for teachers to submit questions.</small>
@@ -374,27 +374,54 @@ $educbt_body = static function () use ( $flash, $subjects, $classes, $series, $p
                     </div>
                 </div>
                 <p id="ca_written_note" class="educbt-note educbt-note--info" style="display:none;margin-top:10px">
-                    Every subject in this window is on paper &mdash; there is nothing to time or pool CBT questions for, so questions-per-student and duration are skipped.
+                    Every subject in this window is on paper &mdash; there is nothing to time or pool questions for, so the question window and per-student/duration settings are skipped.
                 </p>
 
                 <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:14px">Open assessment window</button>
             </form>
             <script>
-            // Written mode has no CBT sitting to size or time, so those two fields
-            // become dead inputs — hidden rather than removed, so the form still
-            // posts a valid default if the office flips back to Mixed/CBT later.
+            // Written mode has no CBT sitting to size, time, or open a submission
+            // window for — those four fields become dead inputs, so they are
+            // hidden (not removed) and given quiet defaults, matching the
+            // website's CaWindowForm. The office still sees a plain note instead
+            // of a form that just looks broken.
             function educbtToggleCaWritten( mode ) {
                 var isWritten = mode === 'written';
+                var opensWrap = document.getElementById( 'ca_opens_wrap' );
+                var closesWrap = document.getElementById( 'ca_closes_wrap' );
                 var countWrap = document.getElementById( 'ca_count_wrap' );
                 var durationWrap = document.getElementById( 'ca_duration_wrap' );
                 var note = document.getElementById( 'ca_written_note' );
+                var opensInput = document.getElementById( 'ca_opens' );
+                var closesInput = document.getElementById( 'ca_closes' );
                 var countInput = document.getElementById( 'ca_count' );
                 var durationInput = document.getElementById( 'ca_duration' );
+
+                if ( opensWrap ) opensWrap.style.display = isWritten ? 'none' : '';
+                if ( closesWrap ) closesWrap.style.display = isWritten ? 'none' : '';
                 if ( countWrap ) countWrap.style.display = isWritten ? 'none' : '';
                 if ( durationWrap ) durationWrap.style.display = isWritten ? 'none' : '';
                 if ( note ) note.style.display = isWritten ? '' : 'none';
+                if ( opensInput ) opensInput.required = ! isWritten;
+                if ( closesInput ) closesInput.required = ! isWritten;
                 if ( countInput ) countInput.required = ! isWritten;
                 if ( durationInput ) durationInput.required = ! isWritten;
+
+                // The window still needs SOME opening/closing date on the row even
+                // with no CBT sitting to time — default to "today, open two
+                // weeks" rather than leaving the office to invent a number for a
+                // field they can no longer see. Only fills blanks, never
+                // overwrites a date the office already chose.
+                if ( isWritten ) {
+                    if ( opensInput && ! opensInput.value ) {
+                        opensInput.value = new Date().toISOString().slice( 0, 10 );
+                    }
+                    if ( closesInput && ! closesInput.value ) {
+                        var d = new Date();
+                        d.setDate( d.getDate() + 14 );
+                        closesInput.value = d.toISOString().slice( 0, 10 );
+                    }
+                }
             }
             </script>
         <?php endif; ?>
@@ -410,7 +437,17 @@ $educbt_body = static function () use ( $flash, $subjects, $classes, $series, $p
             <input type="hidden" name="action" value="educbt_create_examination">
             <?php wp_nonce_field( 'educbt_create_examination' ); ?>
 
-            <div class="educbt-grid">
+            <div>
+                <label for="series_title">Name</label>
+                <input id="series_title" name="title" type="text" placeholder="First Term Examination" style="max-width:420px">
+                <small class="educbt-muted">Leave blank to name it after the term.</small>
+            </div>
+
+            <?php // Session, Term and Assessment mode sit together — they are the
+                  // fields that identify WHICH sitting this is, same grouping as
+                  // the website. Assessment mode goes right after Term so the
+                  // office reads "which term, what format" in one line. ?>
+            <div class="educbt-grid" style="margin-top:14px">
                 <div>
                     <label for="session_id">Session *</label>
                     <select id="session_id" name="session_id" required>
@@ -434,33 +471,46 @@ $educbt_body = static function () use ( $flash, $subjects, $classes, $series, $p
                     </select>
                 </div>
                 <div>
-                    <label for="series_title">Name</label>
-                    <input id="series_title" name="title" type="text" placeholder="First Term Examination">
-                    <small class="educbt-muted">Leave blank to name it after the term.</small>
-                </div>
-                <div>
                     <label for="exam_mode">Assessment mode</label>
-                    <select id="exam_mode" name="assessment_mode">
+                    <select id="exam_mode" name="assessment_mode" onchange="educbtToggleExamWritten(this.value)">
                         <option value="mixed" selected>Mixed &mdash; each teacher chooses CBT or Written</option>
                         <option value="cbt">CBT &mdash; every subject is a CBT test</option>
                         <option value="written">Written &mdash; every subject is on paper</option>
                     </select>
                     <small class="educbt-muted">CBT/Written locks the format for every subject; a Written choice under Mixed still needs the exam office's approval.</small>
                 </div>
-                <div>
+                <div id="exam_opens_wrap">
                     <label for="starts_on">Question window opens</label>
                     <input id="starts_on" name="starts_on" type="date">
                     <small class="educbt-muted">Date teachers can begin submitting questions.</small>
                 </div>
-                <div>
+                <div id="exam_closes_wrap">
                     <label for="ends_on">Question window closes</label>
                     <input id="ends_on" name="ends_on" type="date">
                     <small class="educbt-muted">Deadline for teachers to submit questions. Exam sitting dates are set when the timetable is created.</small>
                 </div>
             </div>
+            <p id="exam_written_note" class="educbt-note educbt-note--info" style="display:none;margin-top:10px">
+                Every subject in this examination is on paper &mdash; there is nothing to time or pool questions for, so the question window is skipped.
+            </p>
 
             <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:16px">Create examination</button>
         </form>
+        <script>
+        // These dates are optional even in Mixed/CBT mode, so unlike the CA
+        // window there is nothing to backfill — Written just has no use for a
+        // teacher question-submission window at all, so it hides with no
+        // default needed.
+        function educbtToggleExamWritten( mode ) {
+            var isWritten = mode === 'written';
+            var opensWrap = document.getElementById( 'exam_opens_wrap' );
+            var closesWrap = document.getElementById( 'exam_closes_wrap' );
+            var note = document.getElementById( 'exam_written_note' );
+            if ( opensWrap ) opensWrap.style.display = isWritten ? 'none' : '';
+            if ( closesWrap ) closesWrap.style.display = isWritten ? 'none' : '';
+            if ( note ) note.style.display = isWritten ? '' : 'none';
+        }
+        </script>
     </section>
 
     <section class="educbt-card">
