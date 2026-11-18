@@ -54,6 +54,8 @@ class TeacherDocuments {
 .educbt-doc__meta { margin:0 0 4mm; font-size:9.5pt; color:#555; text-align:center; }
 .educbt-doc__table td.name { text-align:left; }
 .educbt-doc__empty { text-align:center; color:#666; padding:10mm 0; }
+.educbt-doc__fill { width:100%; margin:0 0 4mm; font-size:10pt; border-collapse:collapse; }
+.educbt-doc__fill td { padding:2mm 0; white-space:nowrap; }
 .educbt-doc__foot { margin-top:6mm; font-size:8.5pt; color:#666; text-align:right; }
 ';
     }
@@ -81,7 +83,7 @@ class TeacherDocuments {
      * @param bool                           $with_answers Teacher's marking copy (shows the key) or a clean paper.
      */
     public function questions( int $school_id, string $subject_name, array $questions, bool $with_answers, string $teacher_name = '' ): string {
-        $title = $with_answers ? 'Question Bank (with answers)' : 'Question Paper';
+        $title = $with_answers ? 'Marking Copy (with answers)' : 'Examination Paper';
         $html  = $this->heading( $school_id, $title, $subject_name );
 
         if ( empty( $questions ) ) {
@@ -94,10 +96,15 @@ class TeacherDocuments {
         }
 
         $meta = count( $questions ) . ' question' . ( count( $questions ) === 1 ? '' : 's' ) . '  •  ' . $this->plain( $total ) . ' marks';
-        if ( $teacher_name !== '' ) {
+        if ( $with_answers && $teacher_name !== '' ) {
             $meta .= '  •  Set by ' . $teacher_name;
         }
         $html .= '<p class="educbt-doc__meta">' . esc_html( $meta ) . '</p>';
+
+        if ( ! $with_answers ) {
+            // Handed to students to write on: somewhere for them to put their details.
+            $html .= '<table class="educbt-doc__fill"><tr><td>Name: ______________________________</td><td>Class: ____________</td><td>Date: ____________</td></tr></table>';
+        }
 
         $groups = [ 'objective' => [], 'theory' => [] ];
         foreach ( $questions as $q ) {

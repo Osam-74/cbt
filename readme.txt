@@ -4,7 +4,7 @@ Tags: education, cbt, school-management, exam, results
 Requires at least: 6.8
 Tested up to: 6.8
 Requires PHP: 8.2
-Stable tag: 3.30.0
+Stable tag: 3.30.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -84,6 +84,9 @@ Yes. EduCBT Frontend Portal theme is available for student/staff-facing workflow
 5. Frontend portal pages for login, exams, and dashboard
 
 == Changelog ==
+
+= 3.30.1 =
+- Downloads: the question export now has two clearly separate versions. "Student copy (no answers)" is titled Examination Paper, shows only the questions and options, and has a Name / Class / Date line, so it can be printed and handed to pupils to write on. "Teacher copy (with answers)" is titled Marking Copy and ticks the correct options and shows the marking guide. The student copy never contains the answers, even in the page source.
 
 = 3.30.0 =
 - Staff assignment: duties are now assigned and shown per class arm. Several teachers can share one subject in one arm, other teachers can take the same subject in other arms, and one teacher can hold many subjects across many arms. Each duty (including class teacher) has its own Remove button, and editing a teacher no longer quietly widens their arms.

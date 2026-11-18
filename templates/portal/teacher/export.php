@@ -67,8 +67,9 @@ if ( $doc === '' ) {
                     <h3 style="margin:0 0 6px;font-size:1rem"><?php echo esc_html( $s['name'] ); ?></h3>
                     <p style="margin:0 0 8px">
                         <strong style="font-size:.85rem">My questions:</strong>
-                        <a class="educbt-btn" target="_blank" href="<?php echo esc_url( add_query_arg( [ 'doc' => 'questions', 'subject' => $sid ], $base ) ); ?>">Question paper</a>
-                        <a class="educbt-btn" target="_blank" href="<?php echo esc_url( add_query_arg( [ 'doc' => 'questions', 'subject' => $sid, 'answers' => 1 ], $base ) ); ?>">With answers</a>
+                        <a class="educbt-btn" target="_blank" href="<?php echo esc_url( add_query_arg( [ 'doc' => 'questions', 'subject' => $sid ], $base ) ); ?>">Student copy (no answers)</a>
+                        <a class="educbt-btn" target="_blank" href="<?php echo esc_url( add_query_arg( [ 'doc' => 'questions', 'subject' => $sid, 'answers' => 1 ], $base ) ); ?>">Teacher copy (with answers)</a>
+                        <span class="educbt-muted" style="font-size:.8rem">Use the student copy to print the paper for pupils to write on.</span>
                     </p>
                     <?php foreach ( $s['classes'] as $c ) : ?>
                         <p style="margin:0 0 6px">
