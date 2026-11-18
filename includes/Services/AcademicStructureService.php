@@ -243,22 +243,30 @@ class AcademicStructureService {
         return $this->default_rules( $stage );
     }
 
+    /**
+     * Defaults place no ceiling on how many subjects a student may register, and no floor beyond "at least one", and no departmental quota.
+     * Schools differ (a junior school may run 15 subjects, a senior one 7 or 10), so a fixed 8-9 / 9-13 band
+     * wrongly blocked real registrations. The things that genuinely matter stay enforced: every compulsory
+     * subject, and subjects that belong to the student's stage and department.
+     *
+     * A school that wants a band can still set one: store `min` / `max` per stage in the option
+     * `educbt_subject_rules_<school_id>` (`min_departmental` too). A `max` of 0 means "no limit".
+     */
     private function default_rules( string $stage ): array {
         if ( $stage === 'junior' ) {
             return [
-                'min'              => 9,
-                'max'              => 13,
+                'min'              => 1,
+                'max'              => 0,
                 'mandatory_codes'  => [ 'ENG-J', 'MTH-J' ],
                 'min_departmental' => 0,
             ];
         }
 
-        // SSCE candidates sit eight or nine subjects.
         return [
-            'min'              => 8,
-            'max'              => 9,
+            'min'              => 1,
+            'max'              => 0,
             'mandatory_codes'  => [ 'ENG', 'MTH', 'CVE' ],
-            'min_departmental' => 3,
+            'min_departmental' => 0,
         ];
     }
 
@@ -291,7 +299,7 @@ class AcademicStructureService {
             $errors[] = 'too_few_subjects:' . $count . '/' . $rules['min'];
         }
 
-        if ( $count > $rules['max'] ) {
+        if ( (int) $rules['max'] > 0 && $count > (int) $rules['max'] ) {
             $errors[] = 'too_many_subjects:' . $count . '/' . $rules['max'];
         }
 

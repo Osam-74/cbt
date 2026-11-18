@@ -114,6 +114,8 @@ class PortalRouter {
                 // window is open. Old links and bookmarks still resolve.
                 'tests'        => [ 'capability' => Capabilities::ENTER_SCORES, 'label' => '' ],
                 'analysis'     => [ 'capability' => Capabilities::ENTER_SCORES, 'label' => 'Subject Results' ],
+                // Printable question papers, class performance and CA/exam records for the teacher's own subjects.
+                'export'       => [ 'capability' => Capabilities::ENTER_SCORES, 'label' => 'Downloads' ],
                 'scores'       => [ 'capability' => Capabilities::ENTER_SCORES, 'label' => 'Record Scores' ],
                 // Hidden from nav — reached via links from Subject Results.
                 'responses'    => [ 'capability' => Capabilities::ENTER_SCORES, 'label' => '' ],

@@ -256,6 +256,7 @@ $educbt_body = static function () use (
         return;
     }
     ?>
+    <p class="educbt-muted" style="margin:0 0 10px;font-size:.9rem">Want a printable copy? <a href="<?php echo esc_url( home_url( '/portal/teacher/export/' ) ); ?>">Open Downloads</a> for your question paper, student performance and CA / exam records.</p>
     <section class="educbt-card no-print">
         <p class="educbt-muted" style="margin-top:-6px">
             <?php echo esc_html( (string) ( $session['title'] ?? '' ) . ' · ' . (string) ( $term['title'] ?? '' ) ); ?>

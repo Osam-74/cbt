@@ -283,6 +283,102 @@ class StaffService {
         );
     }
 
+    /**
+     * Every active duty in the school for one session, one row per (teacher, class, subject).
+     *
+     * The staff screen needs the exact class, arm and subject of each duty. Collapsing them to a level
+     * name ("SS 1") hid which arms a teacher actually holds and made it impossible to remove one arm.
+     *
+     * @return array<int,array<string,mixed>> Keys: id, staff_id, assignment_type, class_id, class_name, subject_id, subject_name.
+     */
+    public function duties_for_school( int $school_id, int $session_id ): array {
+        global $wpdb;
+
+        $a = Schema::table( 'staff_assignments' );
+        $c = Schema::table( 'classes' );
+        $s = Schema::table( 'subjects_v2' );
+        $l = Schema::table( 'class_levels' );
+
+        return (array) $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT a.id, a.staff_id, a.assignment_type, a.class_id, a.subject_id,
+                        COALESCE(NULLIF(c.display_name, ''), c.class_name) AS class_name,
+                        l.level_order, s.name AS subject_name
+                 FROM {$a} a
+                 LEFT JOIN {$c} c ON c.id = a.class_id
+                 LEFT JOIN {$l} l ON l.id = c.level_id
+                 LEFT JOIN {$s} s ON s.id = a.subject_id
+                 WHERE a.school_id = %d AND a.session_id = %d AND a.status = 'active'
+                   AND a.assignment_type IN ('class_teacher','subject_teacher')
+                 ORDER BY a.staff_id ASC, a.assignment_type ASC, s.name ASC, l.level_order ASC, c.display_name ASC",
+                $school_id,
+                $session_id
+            ),
+            ARRAY_A
+        );
+    }
+
+    /**
+     * Other teachers on the same subject in the same class this session. Several teachers sharing one
+     * subject in one class is allowed; the screen shows this so it is a choice and never a surprise.
+     *
+     * @return array<int,string> staff_id => full name
+     */
+    public function co_teachers( int $school_id, int $staff_id, int $class_id, int $subject_id, int $session_id ): array {
+        global $wpdb;
+
+        $rows = (array) $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT st.id, st.first_name, st.last_name FROM ' . Schema::table( 'staff_assignments' ) . ' a
+                 INNER JOIN ' . Schema::table( 'staff' ) . " st ON st.id = a.staff_id
+                 WHERE a.school_id = %d AND a.session_id = %d AND a.class_id = %d AND a.subject_id = %d
+                   AND a.assignment_type = 'subject_teacher' AND a.status = 'active' AND a.staff_id <> %d
+                 ORDER BY st.last_name ASC, st.first_name ASC",
+                $school_id,
+                $session_id,
+                $class_id,
+                $subject_id,
+                $staff_id
+            ),
+            ARRAY_A
+        );
+
+        $out = [];
+
+        foreach ( $rows as $row ) {
+            $out[ (int) $row['id'] ] = trim( (string) $row['first_name'] . ' ' . (string) $row['last_name'] );
+        }
+
+        return $out;
+    }
+
+    /**
+     * Stand one teacher down from a subject in the chosen classes (or all of them), leaving every other
+     * teacher and every other duty untouched.
+     *
+     * @param array<int,int> $class_ids Empty means every class this teacher holds the subject in.
+     * @return int Number of duties ended.
+     */
+    public function unassign_subject( int $school_id, int $staff_id, int $subject_id, array $class_ids, int $session_id ): int {
+        global $wpdb;
+
+        $table = Schema::table( 'staff_assignments' );
+        $ids   = array_values( array_filter( array_map( 'absint', $class_ids ) ) );
+        $sql   = "UPDATE {$table} SET status = 'dropped'
+                  WHERE school_id = %d AND staff_id = %d AND subject_id = %d AND session_id = %d
+                    AND assignment_type = 'subject_teacher' AND status = 'active'";
+        $args  = [ $school_id, $staff_id, $subject_id, $session_id ];
+
+        if ( ! empty( $ids ) ) {
+            $sql  .= ' AND class_id IN (' . implode( ',', array_fill( 0, count( $ids ), '%d' ) ) . ')';
+            $args  = array_merge( $args, $ids );
+        }
+
+        $wpdb->query( $wpdb->prepare( $sql, $args ) );
+
+        return (int) $wpdb->rows_affected;
+    }
+
     public function assignments_for( int $school_id, int $staff_id, int $session_id ): array {
         global $wpdb;
 

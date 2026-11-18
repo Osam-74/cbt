@@ -4,7 +4,7 @@ Tags: education, cbt, school-management, exam, results
 Requires at least: 6.8
 Tested up to: 6.8
 Requires PHP: 8.2
-Stable tag: 3.6.2
+Stable tag: 3.30.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -84,6 +84,13 @@ Yes. EduCBT Frontend Portal theme is available for student/staff-facing workflow
 5. Frontend portal pages for login, exams, and dashboard
 
 == Changelog ==
+
+= 3.30.0 =
+- Staff assignment: duties are now assigned and shown per class arm. Several teachers can share one subject in one arm, other teachers can take the same subject in other arms, and one teacher can hold many subjects across many arms. Each duty (including class teacher) has its own Remove button, and editing a teacher no longer quietly widens their arms.
+- Subject registration: the fixed 8-9 (senior) and 9-13 (junior) subject counts and the departmental minimum are gone. A student may register any number of offered subjects from one upward. Compulsory subjects are still required, and a school can still set its own limits.
+- New Downloads page for teachers: a printable question paper (or a copy with answers), student performance for a class, and the recorded CA and exam scores. Each has the school's heading and the subject as the title, and is saved as a PDF with the browser's Save as PDF. A teacher only ever sees their own subjects, classes and questions.
+- Staff page: download who teaches each subject, or who is class teacher, as a spreadsheet.
+- No database changes. Existing data is untouched on update.
 
 = 3.4.0 =
 - Question sets are now scoped to class LEVEL plus department, not to individual arms. JS1 A and JS1 B sit the same paper, so a teacher entered identical questions once per arm and reviewers saw duplicates. The scope selector now offers "JS1" or "SS1 Science", matching the Create Class screen.

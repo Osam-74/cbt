@@ -109,6 +109,7 @@ class PortalActions {
         add_action( 'admin_post_educbt_set_student_status', [ $this, 'set_student_status' ] );
         add_action( 'admin_post_educbt_approve_student', [ $this, 'approve_student' ] );
         add_action( 'admin_post_educbt_export_students', [ $this, 'export_students' ] );
+        add_action( 'admin_post_educbt_export_assignments', [ $this, 'export_assignments' ] );
         add_action( 'admin_post_educbt_import_students', [ $this, 'import_students' ] );
         add_action( 'admin_post_educbt_update_class', [ $this, 'update_class' ] );
         add_action( 'admin_post_educbt_remove_class', [ $this, 'remove_class' ] );
@@ -4130,6 +4131,44 @@ class PortalActions {
 
         foreach ( $rows as $row ) {
             fputcsv( $out, [ $row['first_name'], $row['last_name'], $row['gender'], $row['date_of_birth'], $row['admission_number'] ] );
+        }
+
+        fclose( $out );
+        exit;
+    }
+
+    /**
+     * Who teaches what, as a spreadsheet: subject teachers (with whoever shares each subject in the class)
+     * or class teachers. Read-only, so anyone who may see the staff list may take it.
+     */
+    public function export_assignments(): void {
+        [ $school_id ] = $this->context( 'educbt_export_assignments' );
+
+        if ( ! Gate::allows( Capabilities::VIEW_STAFF ) ) {
+            $this->fail( 'You do not have permission to export staff assignments.' );
+        }
+
+        $type  = sanitize_key( (string) ( $_POST['type'] ?? 'subject' ) ) === 'class' ? 'class' : 'subject';
+        $data  = ( new \EduCBTPro\Services\TeacherExportService() )->assignment_rows( $school_id );
+        $safe  = static fn ( string $v ): string => \EduCBTPro\Services\TeacherExportService::csv_safe( $v );
+
+        nocache_headers();
+        header( 'Content-Type: text/csv; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename=' . ( $type === 'class' ? 'class-teachers-' : 'subject-teachers-' ) . gmdate( 'Y-m-d' ) . '.csv' );
+
+        $out = fopen( 'php://output', 'w' );
+        fwrite( $out, "\xEF\xBB\xBF" ); // BOM: Excel reads the names as UTF-8.
+
+        if ( $type === 'class' ) {
+            fputcsv( $out, [ 'Class', 'Class teacher', 'Staff number', 'Email', 'Phone' ] );
+            foreach ( $data['class'] as $r ) {
+                fputcsv( $out, [ $safe( $r['class'] ), $safe( $r['teacher'] ), $safe( $r['staff_number'] ), $safe( $r['email'] ), $safe( $r['phone'] ) ] );
+            }
+        } else {
+            fputcsv( $out, [ 'Class', 'Subject', 'Subject teacher', 'Also taught by', 'Staff number', 'Email', 'Phone' ] );
+            foreach ( $data['subject'] as $r ) {
+                fputcsv( $out, [ $safe( $r['class'] ), $safe( $r['subject'] ), $safe( $r['teacher'] ), $safe( $r['shared_with'] ), $safe( $r['staff_number'] ), $safe( $r['email'] ), $safe( $r['phone'] ) ] );
+            }
         }
 
         fclose( $out );

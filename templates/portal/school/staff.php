@@ -25,8 +25,9 @@ $session_id = (int) ( $session['id'] ?? 0 );
 
 $classes = $structure->list_classes( $school_id );
 
-// Group classes by level so the assignment picker shows JS1 once instead of
-// JS1 A, JS1 B, JS1 C. A subject teacher covers the entire level, not one arm.
+// Group classes by level so the picker can offer "all arms of SS 1" in one click, AND each arm on its own.
+// Schools differ: sometimes one teacher takes a subject across every arm, sometimes each arm has its own
+// teacher, and several teachers may share the same subject in the same arm. All of that must be possible.
 $class_levels_list = (array) $wpdb->get_results(
     $wpdb->prepare(
         'SELECT l.id, l.name, l.code, l.stage, l.level_order FROM ' . \EduCBTPro\Core\Schema::table( 'class_levels' ) . ' l
@@ -49,10 +50,15 @@ foreach ( $class_levels_list as $lvl ) {
         'department' => 0,
     ];
 }
+$level_arms = [];
 foreach ( $classes as $cls ) {
     $lid = (int) $cls['level_id'];
     if ( isset( $level_class_ids[ $lid ] ) ) {
         $level_class_ids[ $lid ][] = (int) $cls['id'];
+        $level_arms[ $lid ][]      = [
+            'id'   => (int) $cls['id'],
+            'name' => (string) ( $cls['display_name'] ?? '' ) !== '' ? (string) $cls['display_name'] : trim( (string) ( $cls['class_name'] ?? '' ) . ' ' . (string) ( $cls['arm'] ?? '' ) ),
+        ];
     }
     // Inherit department from the first class of that level (science, arts, etc.).
     if ( isset( $level_meta[ $lid ] ) && $level_meta[ $lid ]['department'] === 0 ) {
@@ -108,65 +114,57 @@ $staff = (array) $wpdb->get_results(
     ARRAY_A
 );
 
-// What each person actually holds. Shown before removal so a principal is never
-// asked to confirm something they cannot see the consequences of.
-$levels_table = \EduCBTPro\Core\Schema::table( 'class_levels' );
+// What each person actually holds, class by class. Shown before removal so a principal is never asked to
+// confirm something they cannot see the consequences of.
+$staff_service = new \EduCBTPro\Services\StaffService();
+$duties        = $staff_service->duties_for_school( $school_id, $session_id );
 
-$holdings = [];
+$holdings = [];   // staff_id => [ class_teacher => [ [id,class_id,class_name] ], subjects => [ subject_id => [ name, classes => [ [id,class_id,class_name,others] ] ] ] ]
+$by_slot  = [];   // "class:subject" => [ staff_id => true ], to name co-teachers without extra queries
 
-foreach ( (array) $wpdb->get_results(
-    $wpdb->prepare(
-        "SELECT a.staff_id, a.assignment_type, l.name AS level_name, sub.name AS subject_name
-         FROM {$assignments} a
-         LEFT JOIN {$classes_table} c ON c.id = a.class_id
-         LEFT JOIN {$levels_table} l ON l.id = c.level_id
-         LEFT JOIN {$subjects_tbl} sub ON sub.id = a.subject_id
-         WHERE a.school_id = %d AND a.status = 'active'",
-        $school_id
-    ),
-    ARRAY_A
-) as $row ) {
-    $staff_id_key = (int) $row['staff_id'];
-    $level_name   = (string) $row['level_name'];
-
-    if ( (string) $row['assignment_type'] === 'class_teacher' ) {
-        // Deduplicate by level name — one entry per level, not per arm.
-        if ( ! in_array( $level_name, $holdings[ $staff_id_key ]['class_teacher'] ?? [], true ) ) {
-            $holdings[ $staff_id_key ]['class_teacher'][] = $level_name;
-        }
-    } else {
-        // Group by subject so "Mathematics — JS1, JS2, JS3" reads as one duty.
-        if ( ! in_array( $level_name, $holdings[ $staff_id_key ]['subjects'][ $row['subject_name'] ] ?? [], true ) ) {
-            $holdings[ $staff_id_key ]['subjects'][ (string) $row['subject_name'] ][] = $level_name;
-        }
+foreach ( $duties as $d ) {
+    if ( (string) $d['assignment_type'] === 'subject_teacher' ) {
+        $by_slot[ (int) $d['class_id'] . ':' . (int) $d['subject_id'] ][ (int) $d['staff_id'] ] = true;
     }
 }
 
+$staff_names = [];
+foreach ( $staff as $m ) {
+    $staff_names[ (int) $m['id'] ] = trim( (string) $m['first_name'] . ' ' . (string) $m['last_name'] );
+}
 
-// Pre-compute assignment IDs for each staff member's subjects so the
-// "Drop a subject" section inside the render closure doesn't need $wpdb
-// (which is not in scope there — causing a fatal error).
-$drop_assignments = [];
-foreach ( $holdings as $staff_id_held => $held_data ) {
-    if ( empty( $held_data['subjects'] ) ) {
+foreach ( $duties as $d ) {
+    $sid_key = (int) $d['staff_id'];
+
+    if ( (string) $d['assignment_type'] === 'class_teacher' ) {
+        $holdings[ $sid_key ]['class_teacher'][] = [
+            'id'         => (int) $d['id'],
+            'class_id'   => (int) $d['class_id'],
+            'class_name' => (string) $d['class_name'],
+        ];
         continue;
     }
-    foreach ( (array) $held_data['subjects'] as $subject_name => $level_list ) {
-        $sub_row = $wpdb->get_row( $wpdb->prepare(
-            'SELECT a.id, a.subject_id FROM ' . \EduCBTPro\Core\Schema::table( 'staff_assignments' ) . ' a
-             INNER JOIN ' . \EduCBTPro\Core\Schema::table( 'subjects_v2' ) . ' s ON s.id = a.subject_id
-             WHERE a.staff_id = %d AND s.name = %s AND a.status = %s AND a.assignment_type = %s LIMIT 1',
-            $staff_id_held, $subject_name, 'active', 'subject_teacher'
-        ), ARRAY_A );
-        if ( $sub_row ) {
-            $drop_assignments[ $staff_id_held ][ $subject_name ] = (int) $sub_row['id'];
+
+    $sub_id = (int) $d['subject_id'];
+    $others = [];
+    foreach ( array_keys( $by_slot[ (int) $d['class_id'] . ':' . $sub_id ] ?? [] ) as $other ) {
+        if ( $other !== $sid_key && isset( $staff_names[ $other ] ) ) {
+            $others[] = $staff_names[ $other ];
         }
     }
+
+    $holdings[ $sid_key ]['subjects'][ $sub_id ]['name']      = (string) $d['subject_name'];
+    $holdings[ $sid_key ]['subjects'][ $sub_id ]['classes'][] = [
+        'id'         => (int) $d['id'],
+        'class_id'   => (int) $d['class_id'],
+        'class_name' => (string) $d['class_name'],
+        'others'     => $others,
+    ];
 }
 
 $educbt_title = 'Staff';
 
-$educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $session, $session_id, $holdings, $class_meta, $class_levels_list, $level_class_ids, $level_meta, $drop_assignments ): void {
+$educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $session, $session_id, $holdings, $class_meta, $class_levels_list, $level_class_ids, $level_meta, $level_arms ): void {
     require EDUCBT_PRO_PATH . 'templates/portal/partials/flash.php';
     ?>
     <section class="educbt-card">
@@ -258,24 +256,37 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
                     <div class="chip-select" data-name="row[__i__][class_ids][]" data-required="1" data-onchange="educbtNarrowSubjects">
                         <div class="chip-select__input">
                             <div class="chip-select__chips"></div>
-                            <div class="chip-select__placeholder">Click to select class levels…</div>
+                            <div class="chip-select__placeholder">Click to select classes or arms…</div>
                             <svg class="chip-select__arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                         </div>
                         <div class="chip-select__dropdown" hidden>
                             <?php foreach ( $class_levels_list as $lvl ) :
-                                $lid = (int) $lvl['id'];
-                                $arm_count = count( $level_class_ids[ $lid ] ?? [] );
+                                $lid  = (int) $lvl['id'];
+                                $arms = (array) ( $level_arms[ $lid ] ?? [] );
+                                $meta = [
+                                    'stage'      => (string) $lvl['stage'],
+                                    'department' => (int) ( $level_meta[ $lid ]['department'] ?? 0 ),
+                                ];
                             ?>
-                                <div class="chip-select__option"
-                                     data-value="<?php echo esc_attr( 'L' . $lid ); ?>"
-                                     data-class-ids="<?php echo esc_attr( wp_json_encode( $level_class_ids[ $lid ] ?? [] ) ); ?>"
-                                     data-stage="<?php echo esc_attr( (string) $lvl['stage'] ); ?>"
-                                     data-department="<?php echo esc_attr( (string) (int) ( $level_meta[ $lid ]['department'] ?? 0 ) ); ?>">
-                                    <?php echo esc_html( (string) $lvl['name'] ); ?>
-                                    <?php if ( $arm_count > 1 ) : ?>
-                                        <span class="educbt-muted" style="font-size:.8rem">(<?php echo $arm_count; ?> arms)</span>
-                                    <?php endif; ?>
-                                </div>
+                                <?php if ( count( $arms ) > 1 ) : ?>
+                                    <div class="chip-select__option chip-select__option--all"
+                                         data-value="<?php echo esc_attr( 'L' . $lid ); ?>"
+                                         data-class-ids="<?php echo esc_attr( wp_json_encode( array_column( $arms, 'id' ) ) ); ?>"
+                                         data-stage="<?php echo esc_attr( $meta['stage'] ); ?>"
+                                         data-department="<?php echo esc_attr( (string) $meta['department'] ); ?>">
+                                        <strong><?php echo esc_html( (string) $lvl['name'] ); ?></strong>
+                                        <span class="educbt-muted" style="font-size:.8rem">— every arm (<?php echo (int) count( $arms ); ?>)</span>
+                                    </div>
+                                <?php endif; ?>
+                                <?php foreach ( $arms as $arm ) : ?>
+                                    <div class="chip-select__option chip-select__option--arm"
+                                         data-value="<?php echo esc_attr( (string) $arm['id'] ); ?>"
+                                         data-level="<?php echo esc_attr( (string) $lid ); ?>"
+                                         data-stage="<?php echo esc_attr( $meta['stage'] ); ?>"
+                                         data-department="<?php echo esc_attr( (string) $meta['department'] ); ?>">
+                                        <?php echo esc_html( (string) $arm['name'] ); ?>
+                                    </div>
+                                <?php endforeach; ?>
                             <?php endforeach; ?>
                         </div>
                     </div>
@@ -330,10 +341,14 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
         var educbtExistingAssignments = <?php
             $existing = [];
             foreach ( $holdings as $staff_id_held => $held_data ) {
-                $existing[ (int) $staff_id_held ] = [
-                    'class_teacher' => (array) ( $held_data['class_teacher'] ?? [] ),
-                    'subjects'      => (array) ( $held_data['subjects'] ?? [] ),
-                ];
+                $entry = [ 'class_teacher' => [], 'subjects' => [] ];
+                foreach ( (array) ( $held_data['class_teacher'] ?? [] ) as $ct ) {
+                    $entry['class_teacher'][] = (int) $ct['class_id'];
+                }
+                foreach ( (array) ( $held_data['subjects'] ?? [] ) as $sub_id => $sub ) {
+                    $entry['subjects'][ (string) $sub_id ] = array_values( array_map( static fn ( $c ) => (int) $c['class_id'], (array) $sub['classes'] ) );
+                }
+                $existing[ (int) $staff_id_held ] = $entry;
             }
             echo wp_json_encode( $existing );
         ?>;
@@ -352,10 +367,14 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
         var educbtLevelMeta = <?php echo wp_json_encode( $level_meta ); ?>;
         var educbtLevelClassIds = <?php echo wp_json_encode( $level_class_ids ); ?>;
 
-        /* When a teacher is selected, pre-fill their existing assignments so the
-           exam officer can update or add to them rather than starting from blank.
-           The chip-select components are driven by hidden inputs, so we simulate
-           selecting the matching options programmatically. */
+        /* When a teacher is selected, pre-fill exactly what they already hold: the same classes and arms and
+           the same subjects, no more. (Matching by level name used to tick every arm of the level, so saving an
+           edit quietly gave the teacher arms they never had.) */
+        function educbtSelectOption(chipSelect, selector) {
+            var opt = chipSelect && chipSelect.querySelector(selector);
+            if (opt && !opt.classList.contains('is-selected')) { educbtChipToggle(chipSelect, opt); }
+        }
+
         function educbtPrefillAssignments(staffSelect) {
             var row = staffSelect.closest('.assign-row');
             if (!row) return;
@@ -363,75 +382,37 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
             var noteEl = row.querySelector('.assign-row__prefill-note');
             var staffId = parseInt(staffSelect.value, 10);
 
-            // Clear any previously pre-filled selections
+            // Clear anything chosen before. Toggle a copy: toggling removes chips as it goes.
             row.querySelectorAll('.chip-select').forEach(function(cs) {
-                cs.querySelectorAll('.chip-select__option.is-selected').forEach(function(opt) {
+                Array.prototype.slice.call(cs.querySelectorAll('.chip-select__option.is-selected')).forEach(function(opt) {
                     educbtChipToggle(cs, opt);
                 });
             });
 
-            if (!staffId || !educbtExistingAssignments[staffId]) {
-                if (noteEl) noteEl.style.display = 'none';
-                return;
-            }
+            var existing = staffId ? educbtExistingAssignments[staffId] : null;
+            if (!existing) { if (noteEl) noteEl.style.display = 'none'; return; }
 
-            var existing = educbtExistingAssignments[staffId];
             var assignmentType = document.getElementById('bulk_type').value;
             var classChipSelect = row.querySelector('.assign-row__classes .chip-select');
             var subjectChipSelect = row.querySelector('.assign-row__subjects .chip-select');
+            var classIds = [];
+            var subjectIds = [];
 
-            if (assignmentType === 'class_teacher' && existing.class_teacher.length) {
-                // Pre-select the class levels the teacher already holds
-                existing.class_teacher.forEach(function(levelName) {
-                    if (classChipSelect) {
-                        classChipSelect.querySelectorAll('.chip-select__option').forEach(function(opt) {
-                            if (opt.textContent.trim().indexOf(levelName) !== -1 && !opt.classList.contains('is-selected')) {
-                                educbtChipToggle(classChipSelect, opt);
-                            }
-                        });
-                    }
-                });
-                if (noteEl) {
-                    noteEl.textContent = 'Pre-filled: ' + existing.class_teacher.join(', ');
-                    noteEl.style.display = 'block';
-                }
-            } else if (assignmentType === 'subject_teacher' && existing.subjects) {
-                var subjectNames = Object.keys(existing.subjects);
-                var levelNames = [];
-                subjectNames.forEach(function(sn) {
-                    (existing.subjects[sn] || []).forEach(function(ln) {
-                        if (levelNames.indexOf(ln) === -1) levelNames.push(ln);
-                    });
-                });
-
-                // Pre-select class levels
-                levelNames.forEach(function(levelName) {
-                    if (classChipSelect) {
-                        classChipSelect.querySelectorAll('.chip-select__option').forEach(function(opt) {
-                            if (opt.textContent.trim().indexOf(levelName) !== -1 && !opt.classList.contains('is-selected')) {
-                                educbtChipToggle(classChipSelect, opt);
-                            }
-                        });
-                    }
-                });
-
-                // Pre-select subjects
-                subjectNames.forEach(function(subjectName) {
-                    if (subjectChipSelect) {
-                        subjectChipSelect.querySelectorAll('.chip-select__option').forEach(function(opt) {
-                            if (opt.textContent.trim() === subjectName && !opt.classList.contains('is-selected')) {
-                                educbtChipToggle(subjectChipSelect, opt);
-                            }
-                        });
-                    }
-                });
-
-                if (noteEl) {
-                    noteEl.textContent = 'Pre-filled: ' + subjectNames.length + ' subject(s), ' + levelNames.length + ' class level(s)';
-                    noteEl.style.display = 'block';
-                }
+            if (assignmentType === 'class_teacher') {
+                classIds = existing.class_teacher.slice();
             } else {
-                if (noteEl) noteEl.style.display = 'none';
+                Object.keys(existing.subjects).forEach(function(sid) {
+                    subjectIds.push(sid);
+                    existing.subjects[sid].forEach(function(cid) { if (classIds.indexOf(cid) === -1) classIds.push(cid); });
+                });
+            }
+
+            classIds.forEach(function(cid) { educbtSelectOption(classChipSelect, '.chip-select__option--arm[data-value="' + cid + '"]'); });
+            subjectIds.forEach(function(sid) { educbtSelectOption(subjectChipSelect, '.chip-select__option[data-value="' + sid + '"]'); });
+
+            if (noteEl && (classIds.length || subjectIds.length)) {
+                noteEl.textContent = 'Already holds ' + subjectIds.length + ' subject(s) in ' + classIds.length + ' class(es). Saving adds to this; use Remove in the staff list to take a duty away.';
+                noteEl.style.display = 'block';
             }
         }
 
@@ -445,17 +426,11 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
             var subjectSelect = row.querySelector('.assign-row__subjects .chip-select');
             if (!subjectSelect) { return; }
 
-            // Get selected level values from the chip-select (e.g. "L5", "L6")
-            var selectedVals = [];
-            chipSelectEl.querySelectorAll('input[type="hidden"]').forEach(function(h) {
-                selectedVals.push(h.value);
+            // The stage (junior/senior) of every chosen option, whether it is a whole level or a single arm.
+            var chosen = [];
+            chipSelectEl.querySelectorAll('.chip-select__option--arm.is-selected').forEach(function(opt) {
+                chosen.push({ stage: opt.getAttribute('data-stage') || 'both' });
             });
-
-            // Look up level metadata for each selected level.
-            var chosen = selectedVals.map(function(v) {
-                var lid = parseInt(String(v).replace('L', ''), 10);
-                return educbtLevelMeta[lid];
-            }).filter(Boolean);
 
             var visible = 0;
             var options = subjectSelect.querySelectorAll('.chip-select__option');
@@ -484,7 +459,7 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
             var label = row.querySelector('.assign-row__subjects label');
             if (label) {
                 label.innerHTML = 'Subjects <span class="educbt-muted">('
-                    + (chosen.length ? visible + ' offered by the chosen levels' : 'choose the levels first')
+                    + (chosen.length ? visible + ' offered by the chosen classes' : 'choose the classes first')
                     + ')</span>';
             }
         }
@@ -505,70 +480,70 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
 
         function educbtChipToggle(chipSelect, option) {
             var val = option.getAttribute('data-value');
-            var text = option.textContent.trim();
+            var text = option.textContent.replace(/\s+/g, ' ').trim();
             var chips = chipSelect.querySelector('.chip-select__chips');
             var placeholder = chipSelect.querySelector('.chip-select__placeholder');
+            var name = chipSelect.dataset.name;
 
-            // Level options (data-class-ids) expand to multiple class_ids on selection.
-            var classIdsJson = option.getAttribute('data-class-ids');
-            var expandsToClasses = classIdsJson && val.charAt(0) === 'L';
+            // "Every arm of SS 1" is a shortcut: it selects or clears each arm option, so what is submitted
+            // is always one hidden input per class id, and the arms always show what is really chosen.
+            var allIdsJson = option.getAttribute('data-class-ids');
+            if (allIdsJson && val.charAt(0) === 'L') {
+                var ids;
+                try { ids = JSON.parse(allIdsJson); } catch (e) { ids = []; }
+                var selectedArms = ids.filter(function (cid) {
+                    var o = chipSelect.querySelector('.chip-select__option--arm[data-value="' + cid + '"]');
+                    return o && o.classList.contains('is-selected');
+                });
+                var makeSelected = selectedArms.length !== ids.length;   // all chosen already -> clear them
+                ids.forEach(function (cid) {
+                    var o = chipSelect.querySelector('.chip-select__option--arm[data-value="' + cid + '"]');
+                    if (o && o.classList.contains('is-selected') !== makeSelected) { educbtChipToggle(chipSelect, o); }
+                });
+                option.classList.toggle('is-selected', makeSelected);
+                return;
+            }
 
             if (option.classList.contains('is-selected')) {
-                // Remove
                 option.classList.remove('is-selected');
                 var chip = chips.querySelector('[data-chip-value="' + val + '"]');
                 if (chip) chip.remove();
-                if (expandsToClasses) {
-                    // Remove all expanded class_id hidden inputs for this level
-                    var expandedIds;
-                    try { expandedIds = JSON.parse(classIdsJson); } catch(e) { expandedIds = []; }
-                    expandedIds.forEach(function(cid) {
-                        var h = chipSelect.querySelector('input[type="hidden"][value="' + cid + '"]');
-                        if (h) h.remove();
-                    });
-                } else {
-                    var hidden = chipSelect.querySelector('input[type="hidden"][value="' + val + '"]');
-                    if (hidden) hidden.remove();
-                }
+                var hidden = chipSelect.querySelector('input[type="hidden"][value="' + val + '"]');
+                if (hidden) hidden.remove();
             } else {
-                // Add
                 option.classList.add('is-selected');
-                var chip = document.createElement('span');
-                chip.className = 'chip-select__chip';
-                chip.setAttribute('data-chip-value', val);
-                chip.innerHTML = esc_html(text) + '<button type="button" class="chip-select__remove" aria-label="Remove">×</button>';
-                chip.querySelector('.chip-select__remove').addEventListener('click', function(e) {
+                var newChip = document.createElement('span');
+                newChip.className = 'chip-select__chip';
+                newChip.setAttribute('data-chip-value', val);
+                newChip.innerHTML = esc_html(text) + '<button type="button" class="chip-select__remove" aria-label="Remove">×</button>';
+                newChip.querySelector('.chip-select__remove').addEventListener('click', function (e) {
                     e.preventDefault();
                     e.stopPropagation();
                     educbtChipToggle(chipSelect, option);
                 });
-                chips.appendChild(chip);
+                chips.appendChild(newChip);
 
-                if (expandsToClasses) {
-                    // Create a hidden input for each class_id in the level
-                    var expandedIds;
-                    try { expandedIds = JSON.parse(classIdsJson); } catch(e) { expandedIds = []; }
-                    expandedIds.forEach(function(cid) {
-                        var hidden = document.createElement('input');
-                        hidden.type = 'hidden';
-                        hidden.name = chipSelect.dataset.name;
-                        hidden.value = String(cid);
-                        chipSelect.appendChild(hidden);
-                    });
-                } else {
-                    var hidden = document.createElement('input');
-                    hidden.type = 'hidden';
-                    hidden.name = chipSelect.dataset.name;
-                    hidden.value = val;
-                    chipSelect.appendChild(hidden);
-                }
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                input.value = val;
+                chipSelect.appendChild(input);
             }
 
-            // Update placeholder visibility
+            // Keep each level's "every arm" option ticked only while all of its arms are.
+            chipSelect.querySelectorAll('.chip-select__option--all').forEach(function (allOpt) {
+                var list;
+                try { list = JSON.parse(allOpt.getAttribute('data-class-ids') || '[]'); } catch (e) { list = []; }
+                var every = list.length > 0 && list.every(function (cid) {
+                    var o = chipSelect.querySelector('.chip-select__option--arm[data-value="' + cid + '"]');
+                    return o && o.classList.contains('is-selected');
+                });
+                allOpt.classList.toggle('is-selected', every);
+            });
+
             var hasChips = chips.children.length > 0;
             if (placeholder) placeholder.style.display = hasChips ? 'none' : '';
 
-            // Fire onchange callback
             if (chipSelect.dataset.onchange) {
                 window[chipSelect.dataset.onchange](chipSelect);
             }
@@ -654,6 +629,8 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
         .chip-select__option { padding: 8px 12px; font-size: 13px; cursor: pointer; }
         .chip-select__option:hover { background: var(--lemon-soft, #F3F7DC); }
         .chip-select__option.is-selected { background: #d1fae5; color: #065f46; font-weight: 600; }
+        .chip-select__option--all { border-top: 1px solid var(--line); background: #f8faf3; }
+        .chip-select__option--arm { padding-left: 26px; }
         .chip-select__chip {
             display: inline-flex; align-items: center; gap: 4px;
             background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 999px;
@@ -670,6 +647,15 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
 
     <section class="educbt-card">
         <h2>Staff <span class="educbt-muted">(<?php echo esc_html( (string) count( $staff ) ); ?>)</span></h2>
+        <?php if ( \EduCBTPro\Core\Gate::allows( \EduCBTPro\Core\Capabilities::VIEW_STAFF ) ) : ?>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px">
+                <input type="hidden" name="action" value="educbt_export_assignments">
+                <?php wp_nonce_field( 'educbt_export_assignments' ); ?>
+                <span class="educbt-muted" style="font-size:.85rem">Download as a spreadsheet:</span>
+                <button type="submit" name="type" value="subject" class="educbt-btn">Subject teachers</button>
+                <button type="submit" name="type" value="class" class="educbt-btn">Class teachers</button>
+            </form>
+        <?php endif; ?>
         <?php if ( empty( $staff ) ) : ?>
             <p class="educbt-muted">No staff added yet.</p>
         <?php else : ?>
@@ -693,16 +679,16 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
                             <?php if ( empty( $held ) ) : ?>
                                 <span class="educbt-muted">none yet</span>
                             <?php else : ?>
-                                <?php foreach ( (array) ( $held['class_teacher'] ?? [] ) as $cls ) : ?>
+                                <?php if ( ! empty( $held['class_teacher'] ) ) : ?>
                                     <div style="font-size:13px;margin-bottom:2px">
                                         <span class="educbt-pill educbt-pill--approved">Class teacher</span>
-                                        <?php echo esc_html( $cls ); ?>
+                                        <?php echo esc_html( implode( ', ', array_column( (array) $held['class_teacher'], 'class_name' ) ) ); ?>
                                     </div>
-                                <?php endforeach; ?>
-                                <?php foreach ( (array) ( $held['subjects'] ?? [] ) as $subject_name => $level_list ) : ?>
+                                <?php endif; ?>
+                                <?php foreach ( (array) ( $held['subjects'] ?? [] ) as $sub ) : ?>
                                     <div style="font-size:13px;margin-bottom:2px">
-                                        <strong><?php echo esc_html( (string) $subject_name ); ?></strong>
-                                        <span class="educbt-muted">— <?php echo esc_html( implode( ', ', array_filter( $level_list ) ) ); ?></span>
+                                        <strong><?php echo esc_html( (string) $sub['name'] ); ?></strong>
+                                        <span class="educbt-muted">— <?php echo esc_html( implode( ', ', array_column( (array) $sub['classes'], 'class_name' ) ) ); ?></span>
                                     </div>
                                 <?php endforeach; ?>
                             <?php endif; ?>
@@ -752,28 +738,41 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
                                 <button type="submit" class="educbt-btn educbt-btn--primary" style="margin-top:12px">Save changes</button>
                             </form>
 
-                            <?php
-                            // Drop a subject from this teacher. Each assignment is a
-                            // separate row in staff_assignments, so removing one is a
-                            // simple status change.
-                            if ( ! empty( $held ) && ! empty( $held['subjects'] ) ) :
-                            ?>
-                            <div style="border-top:1px solid var(--edu-line);padding-top:12px;margin-top:4px">
-                                <h4 style="margin:0 0 8px;font-size:.9rem">Drop a subject</h4>
-                                <?php foreach ( (array) ( $held['subjects'] ?? [] ) as $subject_name => $level_list ) :
-                                    $drop_id = $drop_assignments[ $sid ][ $subject_name ] ?? 0;
-                                ?>
-                                <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>"
+                            <?php if ( ! empty( $held['subjects'] ) || ! empty( $held['class_teacher'] ) ) : ?>
+                            <div class="staff-duties" style="border-top:1px solid var(--edu-line);padding-top:12px;margin-top:4px">
+                                <h4 style="margin:0 0 8px;font-size:.9rem">Duties this person holds</h4>
+                                <p class="educbt-muted" style="margin:0 0 8px;font-size:.82rem">Each line is one class or arm. Removing one leaves every other duty, and every other teacher, as it is.</p>
+
+                                <?php foreach ( (array) ( $held['class_teacher'] ?? [] ) as $ct ) : ?>
+                                <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="staff-duty"
                                       style="display:flex;align-items:center;gap:8px;margin-bottom:6px"
-                                      onsubmit="return confirm('Drop <?php echo esc_attr( $subject_name ); ?> from this teacher?');">
+                                      onsubmit="return confirm('Remove this person as class teacher of <?php echo esc_attr( (string) $ct['class_name'] ); ?>?');">
                                     <input type="hidden" name="action" value="educbt_drop_assignment">
-                                    <input type="hidden" name="assignment_id" value="<?php echo esc_attr( (string) $drop_id ); ?>">
+                                    <input type="hidden" name="assignment_id" value="<?php echo esc_attr( (string) $ct['id'] ); ?>">
                                     <?php wp_nonce_field( 'educbt_drop_assignment' ); ?>
-                                    <span style="font-size:.85rem;flex:1"><?php echo esc_html( (string) $subject_name ); ?>
-                                        <span class="educbt-muted"><?php echo esc_html( ' - ' . implode( ', ', array_filter( (array) $level_list ) ) ); ?></span>
-                                    </span>
-                                    <button type="submit" class="educbt-btn" style="font-size:.78rem;padding:3px 10px;color:#b91c1c;border-color:#f3c9c9">Drop</button>
+                                    <span style="font-size:.85rem;flex:1"><span class="educbt-pill educbt-pill--approved">Class teacher</span> <?php echo esc_html( (string) $ct['class_name'] ); ?></span>
+                                    <button type="submit" class="educbt-btn" style="font-size:.78rem;padding:3px 10px;color:#b91c1c;border-color:#f3c9c9">Remove</button>
                                 </form>
+                                <?php endforeach; ?>
+
+                                <?php foreach ( (array) ( $held['subjects'] ?? [] ) as $sub ) : ?>
+                                    <div style="font-size:.85rem;font-weight:600;margin:10px 0 4px"><?php echo esc_html( (string) $sub['name'] ); ?></div>
+                                    <?php foreach ( (array) $sub['classes'] as $duty ) : ?>
+                                    <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="staff-duty"
+                                          style="display:flex;align-items:center;gap:8px;margin:0 0 4px 12px"
+                                          onsubmit="return confirm('Remove <?php echo esc_attr( (string) $sub['name'] ); ?> in <?php echo esc_attr( (string) $duty['class_name'] ); ?> from this teacher?');">
+                                        <input type="hidden" name="action" value="educbt_drop_assignment">
+                                        <input type="hidden" name="assignment_id" value="<?php echo esc_attr( (string) $duty['id'] ); ?>">
+                                        <?php wp_nonce_field( 'educbt_drop_assignment' ); ?>
+                                        <span style="font-size:.85rem;flex:1">
+                                            <?php echo esc_html( (string) $duty['class_name'] ); ?>
+                                            <?php if ( ! empty( $duty['others'] ) ) : ?>
+                                                <span class="educbt-muted">· also taught by <?php echo esc_html( implode( ', ', (array) $duty['others'] ) ); ?></span>
+                                            <?php endif; ?>
+                                        </span>
+                                        <button type="submit" class="educbt-btn" style="font-size:.78rem;padding:3px 10px;color:#b91c1c;border-color:#f3c9c9">Remove</button>
+                                    </form>
+                                    <?php endforeach; ?>
                                 <?php endforeach; ?>
                             </div>
                             <?php endif; ?>
@@ -800,11 +799,11 @@ $educbt_body = static function () use ( $flash, $staff, $classes, $subjects, $se
                                         This person still holds:
                                         <?php
                                         $held_parts = [];
-                                        foreach ( (array) ( $held['class_teacher'] ?? [] ) as $cls ) {
-                                            $held_parts[] = 'Class teacher: ' . $cls;
+                                        if ( ! empty( $held['class_teacher'] ) ) {
+                                            $held_parts[] = 'Class teacher: ' . implode( ', ', array_column( (array) $held['class_teacher'], 'class_name' ) );
                                         }
-                                        foreach ( (array) ( $held['subjects'] ?? [] ) as $subject_name => $level_list ) {
-                                            $held_parts[] = $subject_name . ' (' . implode( ', ', array_filter( (array) $level_list ) ) . ')';
+                                        foreach ( (array) ( $held['subjects'] ?? [] ) as $sub ) {
+                                            $held_parts[] = (string) $sub['name'] . ' (' . implode( ', ', array_column( (array) $sub['classes'], 'class_name' ) ) . ')';
                                         }
                                         echo esc_html( implode( '; ', $held_parts ) );
                                     ?>.
